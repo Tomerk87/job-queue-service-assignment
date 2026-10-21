@@ -1,6 +1,6 @@
 # Job Queue Service — Implementation Plan v1.1 (Six Phases)
 
-**Status:** IMPLEMENTATION — Phases 1–3 completed; Phase 4 in progress. **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt. **Coding agent:** Claude Code. **Current phase:** 4.
+**Status:** IMPLEMENTATION — Phases 1–4 completed; Phase 5 not started (awaiting execution instruction). **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt. **Coding agent:** Claude Code. **Current phase:** 4.
 
 ## Rules for tracking and verification
 - Each phase has `NOT STARTED | IN PROGRESS | BLOCKED | COMPLETED`, implementation checklist, tests/edge cases, quality review, and Definition of Done (DoD).
@@ -98,7 +98,7 @@
 **Execution Evidence:** see [EVIDENCE.md](EVIDENCE.md#phase-3--retry-priority-and-scheduling).
 
 ## Phase 4 — Crash Recovery and Reliability
-**Status:** IN PROGRESS
+**Status:** COMPLETED
 
 ### Implementation
 - [x] Add configurable lease (default 30s), independent heartbeat (5s) and recovery scan (5s).
@@ -121,7 +121,7 @@
 ### Definition of Done
 - [x] Real-Postgres recovery and fencing tests pass with evidence.
 - [x] No critical open defect; update evidence and Git checkpoint.
-- [ ] Human approves moving to Phase 5.
+- [x] Human approves moving to Phase 5.
 
 **Execution Evidence:** see [EVIDENCE.md](EVIDENCE.md#phase-4--crash-recovery-and-reliability).
 

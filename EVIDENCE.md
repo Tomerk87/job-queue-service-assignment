@@ -288,7 +288,8 @@ _Recorded 2026-10-21._
   - The cooperative timeout fires only at handler wait points (`ctx.sleep`).
   - The starlette TestClient `DeprecationWarning` is unchanged.
 - **Deviations:** none from the approved plan. Added beyond the plan: a test for the heartbeat during a DB outage (spec §7), and removal of uvicorn's `color_message` from the JSON logs.
-- **Commit:** the Phase 4 checkpoint is the commit that adds this entry (`git log --grep '^Phase 4:'`); rollback point `1c1b5fb`. The phase stays IN PROGRESS until the human approves.
+- **Commit:** Phase 4 checkpoint `c658876`; rollback point `1c1b5fb`.
+- **Approval:** human approval for Phase 4 granted on 2026-10-21; status set to COMPLETED. Phase 5 not started.
 
 ## Phase 5 — Full Integration, Edge Cases and Hardening
 
