@@ -383,7 +383,8 @@ _Recorded 2026-10-21._
   - `POST /jobs` waits up to `REDIS_TIMEOUT_SECONDS` (0.5s) per request while Redis is down.
   - The starlette TestClient `DeprecationWarning` is unchanged.
 - **Deviations:** none from the approved plan.
-- **Commit:** pending human instruction (rollback point `386668d`).
+- **Commit:** Phase 5 checkpoint `821b6ce`, committed on the human's instruction; rollback point `386668d`.
+- **Approval:** human approval for Phase 5 granted on 2026-10-22; status set to COMPLETED. Phase 6 not started.
 
 ## Phase 6 — Documentation, Regression and Submission
 

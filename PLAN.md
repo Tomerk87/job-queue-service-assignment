@@ -1,6 +1,6 @@
 # Job Queue Service — Implementation Plan v1.1 (Six Phases)
 
-**Status:** IMPLEMENTATION — Phases 1–4 completed; Phase 5 in progress. **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt. **Coding agent:** Claude Code. **Current phase:** 5.
+**Status:** IMPLEMENTATION — Phases 1–5 completed; Phase 6 not started (awaiting execution instruction). **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt. **Coding agent:** Claude Code. **Current phase:** 5.
 
 ## Rules for tracking and verification
 - Each phase has `NOT STARTED | IN PROGRESS | BLOCKED | COMPLETED`, implementation checklist, tests/edge cases, quality review, and Definition of Done (DoD).
@@ -126,7 +126,7 @@
 **Execution Evidence:** see [EVIDENCE.md](EVIDENCE.md#phase-4--crash-recovery-and-reliability).
 
 ## Phase 5 — Full Integration, Edge Cases and Hardening
-**Status:** IN PROGRESS
+**Status:** COMPLETED
 
 ### Implementation
 - [x] Review all EC-01..EC-19 and fill actual test gaps; do not duplicate existing tests without reason.
@@ -149,8 +149,8 @@
 
 ### Definition of Done
 - [x] Full integration suite green; no unresolved critical consistency defect.
-- [ ] Evidence includes test counts, coverage, failures fixed and Git checkpoint.
-- [ ] Human approves moving to Phase 6.
+- [x] Evidence includes test counts, coverage, failures fixed and Git checkpoint.
+- [x] Human approves moving to Phase 6.
 
 **Execution Evidence:** see [EVIDENCE.md](EVIDENCE.md#phase-5--full-integration-edge-cases-and-hardening).
 
