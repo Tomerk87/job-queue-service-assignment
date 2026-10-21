@@ -13,6 +13,7 @@ x-app-env: &app-env
   LEASE_SECONDS: "30"
   WEBHOOK_FAILURE_RATE: "0.2"
   BATCH_ITEM_DELAY_SECONDS: "0.2"
+  RETRY_DELAYS_SECONDS: "30,120"
 
 services:
   postgres:

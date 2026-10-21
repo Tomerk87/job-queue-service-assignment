@@ -46,7 +46,7 @@ id PK, job_id FK, level, event, message, metadata JSONB, created_at. Record clai
 - Scheduler: SCHEDULED -> PENDING only when scheduled_at <= DB now, via atomic conditional update.
 - Claim: eligible PENDING (`next_run_at <= DB now`) -> PROCESSING; increment attempts; assign fresh claim_token, worker_id, started_at, lease_expires_at.
 - Successful execution: PROCESSING -> COMPLETED only with matching token; persist result, progress=100, completed_at, clear lease/token.
-- Execution error: if attempts < max_attempts -> PENDING with next_run_at = DB now + retry delay; else FAILED; clear lease/token.
+- Execution error: if attempts < max_attempts -> PENDING with next_run_at = DB now + retry delay; else FAILED; clear lease/token. `last_error` keeps the latest error while the job waits for a retry and is cleared on COMPLETED; every attempt's error remains in job_logs.
 - Expired lease: recovery atomically applies same retry/terminal logic based on attempts and invalidates prior token. Recovery must not race with a valid heartbeat or completion: use conditional row update and verify row count.
 - PENDING/SCHEDULED -> CANCELLED only via conditional update.
 - FAILED -> PENDING via manual retry, attempts reset to 0.

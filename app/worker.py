@@ -21,6 +21,7 @@ from app import jobs
 from app.config import Settings, settings
 from app.db import SessionLocal
 from app.handlers import HANDLERS, HandlerContext, LostOwnership, SimulatedFailure
+from app.models import JobStatus
 from app.notifier import JOB_CREATED_CHANNEL
 
 logger = logging.getLogger("app.worker")
@@ -35,6 +36,8 @@ def run_once(
     short transaction, so no transaction or connection is held while the handler runs.
     """
     with SessionLocal() as session:
+        if released := jobs.release_due_jobs(session):
+            logger.info("released %d due scheduled job(s) (worker_id=%s)", released, config.worker_id)
         claimed = jobs.claim_next_job(session, config.worker_id, config.lease)
         if claimed is None:
             return False
@@ -80,9 +83,25 @@ def _execute(
             claimed.id, config.worker_id, type(exc).__name__,
             exc_info=not isinstance(exc, SimulatedFailure),
         )
-        return jobs.record_failure(
-            session, claimed.id, claimed.claim_token, f"{type(exc).__name__}: {exc}"
+        outcome = jobs.record_failure(
+            session,
+            claimed.id,
+            claimed.claim_token,
+            f"{type(exc).__name__}: {exc}",
+            config.retry_delays,
         )
+        if outcome is None:
+            return False
+        if outcome.status == JobStatus.FAILED:
+            logger.warning(
+                "job failed permanently (job_id=%s, attempt=%d)", claimed.id, outcome.attempts
+            )
+        else:
+            logger.info(
+                "retry scheduled (job_id=%s, attempt=%d, next_run_at=%s)",
+                claimed.id, outcome.attempts, outcome.next_run_at.isoformat(),
+            )
+        return True
     if not jobs.complete_job(session, claimed.id, claimed.claim_token, result):
         return False
     logger.info("job completed (job_id=%s, worker_id=%s)", claimed.id, config.worker_id)

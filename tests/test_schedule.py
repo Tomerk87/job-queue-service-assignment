@@ -80,6 +80,7 @@ def _settings(**overrides: object) -> Settings:
         "lease_seconds": 30,
         "webhook_failure_rate": 0.2,
         "batch_item_delay_seconds": 0.2,
+        "retry_delays_seconds": (30, 120),
     }
     return Settings(**(values | overrides))  # type: ignore[arg-type]
 
@@ -108,8 +109,14 @@ def test_settings_reject_negative_schedule_tolerance() -> None:
         {"webhook_failure_rate": -0.1},
         {"webhook_failure_rate": 1.1},
         {"batch_item_delay_seconds": -1},
+        {"retry_delays_seconds": (30,)},
+        {"retry_delays_seconds": (30, 120, 300)},
+        {"retry_delays_seconds": (-1, 120)},
     ],
-    ids=["poll-0", "poll-above-2", "lease-0", "rate-negative", "rate-above-1", "delay-negative"],
+    ids=[
+        "poll-0", "poll-above-2", "lease-0", "rate-negative", "rate-above-1", "delay-negative",
+        "retry-delays-too-few", "retry-delays-too-many", "retry-delay-negative",
+    ],
 )
 def test_settings_reject_invalid_worker_values(overrides: dict[str, object]) -> None:
     with pytest.raises(ValueError):
@@ -119,3 +126,4 @@ def test_settings_reject_invalid_worker_values(overrides: dict[str, object]) -> 
 def test_settings_accept_boundary_worker_values() -> None:
     config = _settings(worker_poll_interval_seconds=2, webhook_failure_rate=1, batch_item_delay_seconds=0)
     assert config.lease.total_seconds() == 30
+    assert [d.total_seconds() for d in config.retry_delays] == [30, 120]
