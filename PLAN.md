@@ -95,7 +95,7 @@
   - The plan's test list gained one line for the `scheduled_at` boundary tests, at the human's request.
   - The retry route is absent rather than stubbed, as the plan allows.
   - After the phase review, TECHNICAL_SPEC wording was aligned to "phase" and `PLAN.md` at the human's request. No requirement changed.
-- **Commit:** `d659188` (Phase 1 checkpoint; rollback point `810444a`). Phase status stays IN PROGRESS until the human approves Phase 2.
+- **Commit:** `d659188` on branch `phase_1_implementation` (Phase 1 checkpoint; rollback point `810444a`). Phase status stays IN PROGRESS until the human approves Phase 2.
 
 ## Phase 2 — Worker and Mock Execution
 **Status:** NOT STARTED | **Estimate:** 5–7 active hours
