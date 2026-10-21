@@ -94,7 +94,7 @@
 - **Deviations:**
   - The plan's test list gained one line for the `scheduled_at` boundary tests, at the human's request.
   - The retry route is absent rather than stubbed, as the plan allows.
-- **Commit:** see Git checkpoint below.
+- **Commit:** `d659188` (Phase 1 checkpoint; rollback point `810444a`). Phase status stays IN PROGRESS until the human approves Phase 2.
 
 ## Phase 2 — Worker and Mock Execution
 **Status:** NOT STARTED | **Estimate:** 5–7 active hours
