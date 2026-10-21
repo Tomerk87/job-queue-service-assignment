@@ -78,6 +78,7 @@ INVALID_BODIES = {
     "report empty name": {"type": "report", "payload": {"report_name": ""}},
     "batch empty items": {"type": "batch", "payload": {"items": []}},
     "batch items not list": {"type": "batch", "payload": {"items": "abc"}},
+    "batch over 100 items": {"type": "batch", "payload": {"items": list(range(101))}},
     "priority below 0": EMAIL_JOB | {"priority": -1},
     "priority above 10": EMAIL_JOB | {"priority": 11},
     "priority not int": EMAIL_JOB | {"priority": "high"},
@@ -98,6 +99,11 @@ def test_invalid_submission_returns_422_and_creates_nothing(
 
     assert response.status_code == 422, response.text
     assert count_rows("jobs") == 0
+
+
+def test_batch_of_max_size_is_accepted(client: TestClient) -> None:
+    response = client.post("/jobs", json={"type": "batch", "payload": {"items": list(range(100))}})
+    assert response.status_code == 201
 
 
 def test_idempotency_key_of_max_length_is_accepted(client: TestClient) -> None:
@@ -142,6 +148,24 @@ def test_scheduled_at_beyond_tolerance_is_rejected(client: TestClient) -> None:
     assert response.status_code == 422
     assert "in the past" in response.json()["detail"]
     assert count_rows("jobs") == 0
+
+
+def test_scheduled_at_beyond_max_ahead_is_rejected(client: TestClient) -> None:
+    too_far = datetime.now(timezone.utc) + timedelta(days=2 * 365)
+
+    response = client.post("/jobs", json=EMAIL_JOB | {"scheduled_at": too_far.isoformat()})
+
+    assert response.status_code == 422
+    assert "in the future" in response.json()["detail"]
+    assert count_rows("jobs") == 0
+
+
+def test_listing_index_exists() -> None:
+    with engine.connect() as conn:
+        definition = conn.scalar(
+            text("SELECT indexdef FROM pg_indexes WHERE indexname = 'ix_jobs_created'")
+        )
+    assert definition is not None and "created_at DESC, id DESC" in definition
 
 
 # --- get / list ------------------------------------------------------------------------------

@@ -27,7 +27,7 @@ Keep transactions short; no DB session sharing across threads; indexed, bounded 
 1. Before starting, read the current phase in `PLAN.md` and change its status from `NOT STARTED` to `IN PROGRESS` (or `BLOCKED` if unable to proceed).
 2. Work only on that phase. Update `[ ]` to `[x]` **only when an implementation item is implemented and verified**, a test is **actually run and passes**, or a DoD/quality gate is actually satisfied.
 3. If a test fails or cannot run, leave it `[ ]`, describe the failure, and mark `BLOCKED` when it prevents the gate. Do not skip, disable or weaken tests to make a checklist green.
-4. Update **Execution Evidence** with commands, results, EC IDs, measured coverage (if any), known issues, deviations and commit hash. Keep unresolved items unchecked.
+4. Update the phase's section in `EVIDENCE.md` with commands, results, EC IDs, measured coverage (if any), known issues, deviations and commit hash. Keep unresolved items unchecked.
 5. Set status `COMPLETED` only after all required gates are verified **and human approval for the next phase is recorded**. Stop and ask for approval; never autonomously begin the next phase.
 6. Never pre-check future phases or invent evidence. The plan is a live execution record, not merely a wish list.
 7. Before executing each phase, verify everything is understandable. If there are any unclear instructions, ask me to decide, and only after full approval execute the phase.

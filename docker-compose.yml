@@ -7,7 +7,12 @@ x-app-env: &app-env
   REDIS_URL: redis://redis:6379/0
   IDEMPOTENCY_TTL_HOURS: "24"
   SCHEDULE_PAST_TOLERANCE_SECONDS: "30"
+  SCHEDULE_MAX_AHEAD_DAYS: "365"
   REDIS_TIMEOUT_SECONDS: "0.5"
+  WORKER_POLL_INTERVAL_SECONDS: "2"
+  LEASE_SECONDS: "30"
+  WEBHOOK_FAILURE_RATE: "0.2"
+  BATCH_ITEM_DELAY_SECONDS: "0.2"
 
 services:
   postgres:
@@ -47,6 +52,7 @@ services:
   api:
     build: *app-build
     image: job-queue-service:local
+    restart: unless-stopped
     environment: *app-env
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
@@ -63,8 +69,11 @@ services:
   worker:
     build: *app-build
     image: job-queue-service:local
+    restart: unless-stopped
     environment: *app-env
     command: ["python", "-m", "app.worker"]
+    # Longer than the longest mock job (batch: 100 items x 0.2s = 20s) so SIGTERM can drain it.
+    stop_grace_period: 30s
     depends_on:
       migrate:
         condition: service_completed_successfully

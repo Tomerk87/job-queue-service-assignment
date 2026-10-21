@@ -17,7 +17,7 @@ from pydantic import (
 
 from app.models import JobStatus, JobType
 
-MAX_BATCH_ITEMS = 1000
+MAX_BATCH_ITEMS = 100
 
 
 class _Payload(BaseModel):

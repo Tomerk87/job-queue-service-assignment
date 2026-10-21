@@ -1,10 +1,12 @@
 """Typed runtime configuration read from environment variables."""
 
 import os
+import socket
 from dataclasses import dataclass
 from datetime import timedelta
 
 MIN_IDEMPOTENCY_TTL_HOURS = 24
+MAX_POLL_INTERVAL_SECONDS = 2.0
 
 
 @dataclass(frozen=True)
@@ -13,13 +15,29 @@ class Settings:
     redis_url: str
     idempotency_ttl_hours: int
     schedule_past_tolerance_seconds: int
+    schedule_max_ahead_days: int
     redis_timeout_seconds: float
+    worker_id: str
+    worker_poll_interval_seconds: float
+    lease_seconds: int
+    webhook_failure_rate: float
+    batch_item_delay_seconds: float
 
     def __post_init__(self) -> None:
         if self.idempotency_ttl_hours < MIN_IDEMPOTENCY_TTL_HOURS:
             raise ValueError(f"IDEMPOTENCY_TTL_HOURS must be >= {MIN_IDEMPOTENCY_TTL_HOURS}")
         if self.schedule_past_tolerance_seconds < 0:
             raise ValueError("SCHEDULE_PAST_TOLERANCE_SECONDS must be >= 0")
+        if self.schedule_max_ahead_days <= 0:
+            raise ValueError("SCHEDULE_MAX_AHEAD_DAYS must be > 0")
+        if not 0 < self.worker_poll_interval_seconds <= MAX_POLL_INTERVAL_SECONDS:
+            raise ValueError(f"WORKER_POLL_INTERVAL_SECONDS must be in (0, {MAX_POLL_INTERVAL_SECONDS}]")
+        if self.lease_seconds <= 0:
+            raise ValueError("LEASE_SECONDS must be > 0")
+        if not 0 <= self.webhook_failure_rate <= 1:
+            raise ValueError("WEBHOOK_FAILURE_RATE must be in [0, 1]")
+        if self.batch_item_delay_seconds < 0:
+            raise ValueError("BATCH_ITEM_DELAY_SECONDS must be >= 0")
 
     @property
     def idempotency_ttl(self) -> timedelta:
@@ -28,6 +46,14 @@ class Settings:
     @property
     def schedule_past_tolerance(self) -> timedelta:
         return timedelta(seconds=self.schedule_past_tolerance_seconds)
+
+    @property
+    def schedule_max_ahead(self) -> timedelta:
+        return timedelta(days=self.schedule_max_ahead_days)
+
+    @property
+    def lease(self) -> timedelta:
+        return timedelta(seconds=self.lease_seconds)
 
 
 def load_settings() -> Settings:
@@ -38,7 +64,13 @@ def load_settings() -> Settings:
         redis_url=os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
         idempotency_ttl_hours=int(os.environ.get("IDEMPOTENCY_TTL_HOURS", "24")),
         schedule_past_tolerance_seconds=int(os.environ.get("SCHEDULE_PAST_TOLERANCE_SECONDS", "30")),
+        schedule_max_ahead_days=int(os.environ.get("SCHEDULE_MAX_AHEAD_DAYS", "365")),
         redis_timeout_seconds=float(os.environ.get("REDIS_TIMEOUT_SECONDS", "0.5")),
+        worker_id=os.environ.get("WORKER_ID") or f"{socket.gethostname()}-{os.getpid()}",
+        worker_poll_interval_seconds=float(os.environ.get("WORKER_POLL_INTERVAL_SECONDS", "2")),
+        lease_seconds=int(os.environ.get("LEASE_SECONDS", "30")),
+        webhook_failure_rate=float(os.environ.get("WEBHOOK_FAILURE_RATE", "0.2")),
+        batch_item_delay_seconds=float(os.environ.get("BATCH_ITEM_DELAY_SECONDS", "0.2")),
     )
 
 
