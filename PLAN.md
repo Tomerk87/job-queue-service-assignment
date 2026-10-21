@@ -1,6 +1,6 @@
 # Job Queue Service — Implementation Plan v1.1 (Six Phases)
 
-**Status:** IMPLEMENTATION — Phase 1 completed; Phase 2 in progress. **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt. **Coding agent:** Claude Code. **Current phase:** 2.
+**Status:** IMPLEMENTATION — Phases 1–2 completed; Phase 3 not started (awaiting execution instruction). **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt. **Coding agent:** Claude Code. **Current phase:** 2.
 
 ## Rules for tracking and verification
 - Each phase has `NOT STARTED | IN PROGRESS | BLOCKED | COMPLETED`, implementation checklist, tests/edge cases, quality review, and Definition of Done (DoD).
@@ -42,7 +42,7 @@
 **Execution Evidence:** see [EVIDENCE.md](EVIDENCE.md#phase-1--foundation-and-api).
 
 ## Phase 2 — Worker and Mock Execution
-**Status:** IN PROGRESS
+**Status:** COMPLETED
 
 ### Implementation
 - [x] Implement atomic PostgreSQL claim using `FOR UPDATE SKIP LOCKED` and a fresh claim token.
@@ -65,7 +65,7 @@
 ### Definition of Done
 - [x] Worker happy path and concurrent claim integration pass with evidence.
 - [x] No critical open defect; update evidence and Git checkpoint.
-- [ ] Human approves moving to Phase 3.
+- [x] Human approves moving to Phase 3.
 
 **Execution Evidence:** see [EVIDENCE.md](EVIDENCE.md#phase-2--worker-and-mock-execution).
 

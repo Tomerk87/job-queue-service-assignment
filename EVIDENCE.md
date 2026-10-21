@@ -142,7 +142,8 @@ _Recorded 2026-10-21._
     - `ix_jobs_created` exists. `conftest` runs `downgrade base` → `upgrade head`, so 0002 is exercised both ways.
   - *Migration on a database with data:* on a fresh Compose stack, migrate ran 0001 → 0002. With 3 jobs present, `docker compose run --rm migrate alembic downgrade 0001` ran "0002 -> 0001" and `alembic upgrade head` ran "0001 -> 0002". Afterwards `alembic_version` = 0002, 3 rows were intact and the index existed.
   - *API checks:* 400 days ahead → 422 "scheduled_at is more than 365 days in the future"; 300 days ahead → 201 SCHEDULED; `GET /jobs` → 200.
-- **Phase 1 improvements commit:** the commit that adds this entry (`git log --grep '^Phase 1 improvements:'`). The phase stays IN PROGRESS until the human approves.
+- **Phase 1 improvements commit:** `ca9887a`. Evidence moved from PLAN.md to EVIDENCE.md in `27eda14`.
+- **Approval:** human approval for Phase 2 granted on 2026-10-21; status set to COMPLETED. Phase 3 not started.
 
 ## Phase 3 — Retry, Priority and Scheduling
 
