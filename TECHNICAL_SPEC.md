@@ -20,6 +20,7 @@ Services: FastAPI API, Python worker, PostgreSQL, Redis. Docker Compose runs all
 
 ## 3. Job API contracts
 - `POST /jobs`: validate type-specific payload, priority integer 0–10 (default 0), max_attempts fixed to 3, optional future scheduled_at (UTC timestamp), optional idempotency_key <=255 chars. New job: HTTP 201 with job representation; duplicate active key: HTTP 200 with original job; invalid: 422. Job persistence commits before best-effort Redis notification.
+- `scheduled_at` rules (compared with DB now; timezone-aware input normalized to UTC): missing/null -> PENDING; future -> SCHEDULED; past or now within a configurable tolerance (default 30 seconds, inclusive) -> PENDING; more than the tolerance in the past -> 422; unparseable or timezone-naive -> 422.
 - `GET /jobs/{id}`: job status, attempts, progress, result/error, timestamps; 404 when absent.
 - `GET /jobs?status=&type=&limit=&offset=`: filtered, paginated, newest first; validate bounds.
 - `POST /jobs/{id}/cancel`: atomically cancel PENDING/SCHEDULED; already CANCELLED returns 200; PROCESSING/COMPLETED/FAILED returns 409; missing returns 404. Cancellation racing a claim has one winner.
@@ -41,7 +42,7 @@ Indexes: eligibility `(priority DESC, created_at ASC)` filtered on PENDING plus 
 id PK, job_id FK, level, event, message, metadata JSONB, created_at. Record claim, retry, recovery, manual retry, completion and terminal failure; avoid sensitive payload logging.
 
 ## 5. State machine
-- On creation: future scheduled_at -> SCHEDULED; otherwise PENDING.
+- On creation: future scheduled_at -> SCHEDULED; missing, or past/now within the tolerance window (section 3) -> PENDING; older than the tolerance -> rejected with 422.
 - Scheduler: SCHEDULED -> PENDING only when scheduled_at <= DB now, via atomic conditional update.
 - Claim: eligible PENDING (`next_run_at <= DB now`) -> PROCESSING; increment attempts; assign fresh claim_token, worker_id, started_at, lease_expires_at.
 - Successful execution: PROCESSING -> COMPLETED only with matching token; persist result, progress=100, completed_at, clear lease/token.
@@ -111,15 +112,15 @@ The objective is the **simplest correct, defensible solution**, not minimum line
 - **Correctness:** concurrency invariants outrank elegance. Every state-changing query has explicit eligibility predicates and checked affected-row count. Database time governs eligibility/leases.
 - **Maintainability:** avoid duplicate transition rules across API, worker and recovery; centralize shared retry timing and transition logic without introducing a general-purpose workflow engine.
 - **Explainability:** candidate must be able to describe each module, critical query, transaction boundary, recovery window, and design tradeoff in an interview.
-- **Review gate each iteration:** inspect new dependencies, unused code, layering, exception handling, transaction lifetimes, query/index alignment, log safety and deterministic testability. Remove unnecessary complexity only when doing so does not destabilize verified behavior.
+- **Review gate each phase:** inspect new dependencies, unused code, layering, exception handling, transaction lifetimes, query/index alignment, log safety and deterministic testability. Remove unnecessary complexity only when doing so does not destabilize verified behavior.
 
 ## 14. Test strategy and coverage policy (v1.1)
-Testing is incremental: write/run relevant tests in the same iteration as each feature. Iteration 5 is cross-component integration/hardening, **not** the first testing iteration; iteration 6 is full regression and fresh-environment verification.
+Testing is incremental: write/run relevant tests in the same phase as each feature. Phase 5 is cross-component integration/hardening, **not** the first testing phase; Phase 6 is full regression and fresh-environment verification.
 
 **Targets for final submission (project quality goals, not assignment mandates):**
 - >= **85% line coverage** of measured application code (`pytest --cov=app --cov-report=term-missing --cov-report=xml`), with migrations, tests, generated files, and pure entrypoint/bootstrap boilerplate excluded via a documented configuration.
 - Aim for >= **90% line coverage in critical business logic modules**: claiming, state transitions, retry scheduling, idempotency and lease recovery. Report module-specific measurements; do not fabricate or claim these numbers until measured.
-- Coverage is a **supporting metric**, never a substitute for meaningful assertions. Prioritize concurrency correctness, failure paths and integration evidence over chasing a percentage. Early iterations have **no artificial global percentage gate**; new behavior must have meaningful tests.
+- Coverage is a **supporting metric**, never a substitute for meaningful assertions. Prioritize concurrency correctness, failure paths and integration evidence over chasing a percentage. Early phases have **no artificial global percentage gate**; new behavior must have meaningful tests.
 - Unit tests: payload validation, retry calculations, transitions, deterministic handlers and error mapping.
 - Integration tests: real PostgreSQL for atomic claim, idempotency races, cancellation races, leases and fencing. SQLite/mocks are not valid substitutes for these semantics.
 - End-to-end tests: Compose API -> DB -> worker -> DB, multiple workers, Redis unavailable, restart and shutdown. Avoid flaky sleep-based tests where possible; use controlled clocks/configurable short intervals, barriers and deterministic handlers. Distinguish automated tests from manual smoke demonstrations.
@@ -127,9 +128,9 @@ Testing is incremental: write/run relevant tests in the same iteration as each f
 - Record exact commands, passed/failed/skipped counts, actual coverage output and known flaky tests in the implementation plan. A checkbox may be checked only when verified.
 
 ### Edge-case matrix (test IDs are stable across plan and test names)
-| ID | Area | Required scenario | Earliest iteration | Test type |
+| ID | Area | Required scenario | Earliest phase | Test type |
 |---|---|---|---|---|
-| EC-01 | API | invalid/missing type-specific payload; invalid priority/date/limit | 1 | API |
+| EC-01 | API | invalid/missing type-specific payload; invalid priority/date/limit; scheduled_at boundaries (exactly 30s past accepted, beyond 30s/far past/naive rejected) | 1 | Unit + API |
 | EC-02 | API | missing job ID -> 404; invalid state action -> 409 | 1/3 | API |
 | EC-03 | Idempotency | two simultaneous submissions, same active key -> one job | 1 | PostgreSQL integration |
 | EC-04 | Idempotency | expired key reused atomically; old job retained | 1/5 | PostgreSQL integration |
@@ -151,6 +152,6 @@ Testing is incremental: write/run relevant tests in the same iteration as each f
 | EC-20 | Submission | fresh Compose boot, migrations, all tests and docs work | 6 | Clean-environment smoke |
 
 ## 15. Definition of done and traceability (v1.1)
-A feature is complete only when implementation, positive-path test, relevant negative/edge-case test, and an actual executed verification are documented. Each iteration has its own implementation, tests, and quality checkboxes in `IMPLEMENTATION_PLAN.md`. Mark `[x]` **only after** successful verification, attach exact commands/results and record deviations; never infer success from generated code or a tool's unsupported claim. Do not start the next iteration without human approval. `AGENTS.md` defines the agent workflow.
+A feature is complete only when implementation, positive-path test, relevant negative/edge-case test, and an actual executed verification are documented. Each phase has its own implementation, tests, and quality checkboxes in `PLAN.md`. Mark `[x]` **only after** successful verification, attach exact commands/results and record deviations; never infer success from generated code or a tool's unsupported claim. Do not start the next phase without human approval. `AGENTS.md` defines the agent workflow.
 
 **Priority if time is constrained:** preserve all mandatory assignment behavior and correctness of claims/retries/idempotency. Coverage targets are quality goals, not a reason to skip essential functionality or fabricate results. Optional polish is reduced before correctness testing. A missing coverage target must be reported transparently.

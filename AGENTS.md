@@ -31,6 +31,7 @@ Keep transactions short; no DB session sharing across threads; indexed, bounded 
 5. Set status `COMPLETED` only after all required gates are verified **and human approval for the next phase is recorded**. Stop and ask for approval; never autonomously begin the next phase.
 6. Never pre-check future phases or invent evidence. The plan is a live execution record, not merely a wish list.
 7. Before executing each phase, verify everything is understandable. If there are any unclear instructions, ask me to decide, and only after full approval execute the phase.
+8. At the end of each phase execution - summarize what was implemented, list files created or modified, report the exact tests and commands executed, with pass/fail results, report measured test coverage, identify remaining issues, risks, or deviations and state whether the phase meets its Definition of Done
 
 ## Per-phase execution protocol
 1. Read `CLAUDE.md`, `AGENTS.md`, `TECHNICAL_SPEC.md`, `PLAN.md`.

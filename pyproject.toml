@@ -1,0 +1,17 @@
+[project]
+name = "job-queue-service"
+version = "0.1.0"
+description = "Distributed background job queue: FastAPI API, PostgreSQL state, Redis wake-ups, Python workers."
+requires-python = ">=3.11"
+# Runtime dependencies are pinned in requirements.txt; test tooling in requirements-dev.txt.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-p no:cacheprovider"
+
+[tool.coverage.run]
+source = ["app"]
+
+[tool.coverage.report]
+show_missing = true
