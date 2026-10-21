@@ -57,7 +57,7 @@ Max 3 started attempts per cycle. Attempt 1 immediately; on failure or lease exp
 ## 7. Worker algorithm and concurrency
 Claim in a short PostgreSQL transaction using `FOR UPDATE SKIP LOCKED`, order by priority DESC, created_at ASC, with eligibility filters. Only one valid claim token per job. Run handler after commit. Finish/heartbeat/progress operations require `(id, status=PROCESSING, claim_token=current_token)` and must not change state if no rows match.
 
-Default lease=30s, heartbeat every 5s, recovery scan every 5s, idle DB polling <=2s. Values configurable. Heartbeat operates independently of blocking handler work (e.g. dedicated thread or async-safe execution strategy), with its own DB session. Handler must never reuse a session across threads. If heartbeat fails repeatedly or token is lost, do not write completion; log lost ownership. This cannot forcibly prevent already-started external side effects.
+Default lease=30s, heartbeat every 5s, recovery scan every 5s, idle DB polling <=2s. Values configurable. Heartbeat operates independently of blocking handler work (e.g. dedicated thread or async-safe execution strategy), with its own DB session. Handler must never reuse a session across threads. If heartbeat fails repeatedly or token is lost, do not write completion; log lost ownership. This cannot forcibly prevent already-started external side effects. Fenced writes also require `lease_expires_at > now()`: once a lease lapses only recovery may change the row, so a late completion and recovery can never both apply.
 
 Graceful shutdown: stop claiming on SIGTERM, keep heartbeat for active job, finish current job if possible, then exit. Docker stop grace period must exceed the longest mock job plus overhead; forced kill relies on lease recovery.
 
@@ -78,7 +78,7 @@ Redis notification is only a hint; use polling as the correctness fallback. No r
 - Crash after external side effect before completion commit: side effect may repeat. Exactly-once external execution is **not guaranteed**; downstream idempotency is needed in real integrations.
 - Concurrent cancel and claim: atomic transitions ensure only one succeeds.
 - PostgreSQL outage: API submission cannot be acknowledged as successful unless committed; workers wait/retry connection.
-- A permanently stuck handler may outlive its lease if heartbeat continues: enforce handler timeout or ensure heartbeat stops on timeout/loss of liveness. **Explicit acceptance requirement:** bounded handler execution or an effective timeout; do not allow indefinite heartbeat for a hung handler. This is a practical refinement of the earlier design.
+- A permanently stuck handler may outlive its lease if heartbeat continues: enforce handler timeout or ensure heartbeat stops on timeout/loss of liveness. **Explicit acceptance requirement:** bounded handler execution or an effective timeout; do not allow indefinite heartbeat for a hung handler. This is a practical refinement of the earlier design. Implemented as: `JOB_TIMEOUT_SECONDS` enforced cooperatively (the attempt fails and is retried); the heartbeat stops renewing at the deadline; if the handler is still running one lease after the deadline the worker process exits (Docker restarts it) and recovery requeues the job.
 
 ## 10. Acceptance criteria
 1. `docker compose up --build` starts API, worker, PostgreSQL and Redis with documented setup/migrations.

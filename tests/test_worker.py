@@ -402,3 +402,35 @@ def test_run_survives_database_outage_and_keeps_polling(monkeypatch: pytest.Monk
 
     assert not loop.is_alive()
     assert 2 <= attempts <= 8  # retried roughly every 0.2s, not in a busy loop
+
+
+# --- job timeout and heartbeat-detected loss (EC-18 cooperative path) ------------------------------
+
+
+def test_job_past_its_timeout_fails_the_attempt_and_is_retried(client: TestClient) -> None:
+    job_id = submit(client, "batch", payload={"items": list(range(10))})
+    config = replace(FAST, job_timeout_seconds=0.25, batch_item_delay_seconds=0.1)
+
+    started = time.monotonic()
+    assert work_once(config, sleep=time.sleep) is True
+    assert time.monotonic() - started < 1  # stopped at the deadline, not after all 10 items
+
+    row = db_row(job_id)
+    assert (row.status, row.attempts) == ("PENDING", 1)
+    assert row.last_error == "JobTimeout: job exceeded 0.25s timeout"
+    assert 0 < row.progress < 100
+    assert log_events(job_id) == ["created", "claimed", "retry_scheduled"]
+
+
+def test_heartbeat_detecting_lost_lease_stops_the_handler(client: TestClient) -> None:
+    job_id = submit(client, "email")
+    config = replace(FAST, lease_seconds=1.0, heartbeat_interval_seconds=0.1)
+    takeover = threading.Timer(0.3, steal_job, args=(job_id,))
+    takeover.start()
+
+    assert work_once(config, sleep=time.sleep) is True  # email sleeps ~2.7s with Random(0)
+    takeover.join()
+
+    row = db_row(job_id)
+    assert (row.status, row.result, row.last_error) == ("PROCESSING", None, None)
+    assert log_events(job_id) == ["created", "claimed"]

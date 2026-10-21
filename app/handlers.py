@@ -18,7 +18,11 @@ class SimulatedFailure(Exception):
 
 
 class LostOwnership(Exception):
-    """A fenced progress write was rejected: this worker no longer owns the job."""
+    """This worker no longer owns the job (fenced write rejected or lease lost)."""
+
+
+class JobTimeout(Exception):
+    """The job ran past JOB_TIMEOUT_SECONDS; the attempt fails and is retried."""
 
 
 @dataclass(frozen=True)

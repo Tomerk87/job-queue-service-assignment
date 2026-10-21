@@ -1,6 +1,6 @@
 # Job Queue Service — Implementation Plan v1.1 (Six Phases)
 
-**Status:** IMPLEMENTATION — Phases 1–3 completed; Phase 4 not started (awaiting execution instruction). **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt. **Coding agent:** Claude Code. **Current phase:** 3.
+**Status:** IMPLEMENTATION — Phases 1–3 completed; Phase 4 in progress. **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt. **Coding agent:** Claude Code. **Current phase:** 4.
 
 ## Rules for tracking and verification
 - Each phase has `NOT STARTED | IN PROGRESS | BLOCKED | COMPLETED`, implementation checklist, tests/edge cases, quality review, and Definition of Done (DoD).
@@ -98,29 +98,29 @@
 **Execution Evidence:** see [EVIDENCE.md](EVIDENCE.md#phase-3--retry-priority-and-scheduling).
 
 ## Phase 4 — Crash Recovery and Reliability
-**Status:** NOT STARTED
+**Status:** IN PROGRESS
 
 ### Implementation
-- [ ] Add configurable lease (default 30s), independent heartbeat (5s) and recovery scan (5s).
-- [ ] Fence heartbeat/progress/completion/failure by claim token and status.
-- [ ] Recover expired leases with correct retry delays/attempt accounting; prevent recovery-vs-heartbeat races.
-- [ ] Implement SIGTERM drain, bounded execution/timeout, and forced-kill recovery.
-- [ ] Add structured JSON logs for worker and transition events without sensitive payloads.
+- [x] Add configurable lease (default 30s), independent heartbeat (5s) and recovery scan (5s).
+- [x] Fence heartbeat/progress/completion/failure by claim token and status.
+- [x] Recover expired leases with correct retry delays/attempt accounting; prevent recovery-vs-heartbeat races.
+- [x] Implement SIGTERM drain, bounded execution/timeout, and forced-kill recovery.
+- [x] Add structured JSON logs for worker and transition events without sensitive payloads.
 
 ### Tests & verification
-- [ ] Crash/expired lease requeues or terminally fails according to attempt count (EC-11).
-- [ ] Stale completion/progress/heartbeat are rejected (EC-12).
-- [ ] Live heartbeat prevents premature reclaim (EC-13).
-- [ ] Graceful shutdown and forced stop recovery work (EC-17).
-- [ ] Hung handler cannot be renewed forever (EC-18).
+- [x] Crash/expired lease requeues or terminally fails according to attempt count (EC-11).
+- [x] Stale completion/progress/heartbeat are rejected (EC-12).
+- [x] Live heartbeat prevents premature reclaim (EC-13).
+- [x] Graceful shutdown and forced stop recovery work (EC-17).
+- [x] Hung handler cannot be renewed forever (EC-18).
 
 ### Code Quality Gate
-- [ ] No shared DB session across threads; bounded resource usage; recovery logic remains explicit.
-- [ ] Concurrency and failure windows documented, no false exactly-once claim.
+- [x] No shared DB session across threads; bounded resource usage; recovery logic remains explicit.
+- [x] Concurrency and failure windows documented, no false exactly-once claim.
 
 ### Definition of Done
-- [ ] Real-Postgres recovery and fencing tests pass with evidence.
-- [ ] No critical open defect; update evidence and Git checkpoint.
+- [x] Real-Postgres recovery and fencing tests pass with evidence.
+- [x] No critical open defect; update evidence and Git checkpoint.
 - [ ] Human approves moving to Phase 5.
 
 **Execution Evidence:** see [EVIDENCE.md](EVIDENCE.md#phase-4--crash-recovery-and-reliability).
