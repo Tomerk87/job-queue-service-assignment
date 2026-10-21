@@ -3,8 +3,8 @@
 Distributed background job processing: FastAPI API, PostgreSQL as the authoritative queue/state store,
 Redis as a best-effort wake-up channel, and separate Python worker processes.
 
-> Work in progress (Phase 3 of 6). Execution, retry with backoff, priority and scheduling work;
-> crash recovery (lease expiry) and graceful-shutdown hardening arrive in Phase 4. See `PLAN.md`.
+> Work in progress (Phase 4 of 6). Execution, retry, priority, scheduling and crash recovery work;
+> Phase 5 adds full integration hardening and Phase 6 the final documentation. See `PLAN.md`.
 
 ## Run
 
@@ -65,6 +65,26 @@ Mock handlers: email sleeps 1–3s, webhook 1–2s with a `WEBHOOK_FAILURE_RATE`
 failure (no HTTP request is made), report 3–5s, batch `BATCH_ITEM_DELAY_SECONDS` per item with
 progress updates.
 
+## Reliability
+
+- **Lease and heartbeat:** a claim gives the worker a lease (`LEASE_SECONDS`, 30s). A heartbeat thread
+  renews it every `HEARTBEAT_INTERVAL_SECONDS` (5s) while the handler runs. Every progress, completion
+  or failure write requires the worker's claim token *and* an unexpired lease, so a worker that was
+  paused, partitioned or replaced can't overwrite newer state.
+- **Recovery:** every worker scans for expired leases every `RECOVERY_INTERVAL_SECONDS` (5s). A job
+  whose worker crashed or was killed counts that as a failed attempt and follows the normal retry rule
+  (30s, 120s, then `FAILED`).
+- **Timeout:** a job that runs longer than `JOB_TIMEOUT_SECONDS` (60s) fails the attempt and is retried.
+  A handler that hangs without returning stops being renewed. If it is still stuck one lease later,
+  the worker process exits, Docker restarts it, and recovery requeues the job.
+- **Shutdown:** `docker compose stop` sends SIGTERM. The worker stops claiming and finishes the
+  current job (its heartbeat keeps the lease alive) within the 30s grace period. A forced kill is
+  handled by lease recovery.
+- **Delivery guarantee:** at-least-once. A job can run more than once (e.g. after a crash right
+  before its completion was saved). Real integrations need idempotent side effects.
+- **Logs:** the API and the worker write one JSON object per line (`ts`, `level`, `logger`,
+  `message`, plus `event`, `job_id`, `worker_id` where relevant). Payloads are never logged.
+
 ## Configuration
 
 | Variable | Default | Purpose |
@@ -77,7 +97,10 @@ progress updates.
 | `REDIS_TIMEOUT_SECONDS` | `0.5` | Socket timeout for best-effort Redis calls |
 | `WORKER_ID` | `<hostname>-<pid>` | Worker identity stored on claimed jobs |
 | `WORKER_POLL_INTERVAL_SECONDS` | `2` | Max idle wait before polling PostgreSQL (0 < x <= 2) |
-| `LEASE_SECONDS` | `30` | Claim lease length (recovery arrives in Phase 4) |
+| `LEASE_SECONDS` | `30` | Claim lease length; renewed by the heartbeat |
+| `HEARTBEAT_INTERVAL_SECONDS` | `5` | Lease renewal interval (must be < lease) |
+| `RECOVERY_INTERVAL_SECONDS` | `5` | How often each worker recovers expired leases |
+| `JOB_TIMEOUT_SECONDS` | `60` | Maximum run time of one attempt |
 | `WEBHOOK_FAILURE_RATE` | `0.2` | Probability of a simulated webhook failure (0..1) |
 | `BATCH_ITEM_DELAY_SECONDS` | `0.2` | Simulated processing time per batch item |
 | `RETRY_DELAYS_SECONDS` | `30,120` | Delays before automatic attempts 2 and 3 |

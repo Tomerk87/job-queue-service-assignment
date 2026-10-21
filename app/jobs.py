@@ -2,8 +2,9 @@
 
 Every state change is a conditional statement in a short transaction; database
 time (now()) is authoritative for scheduling, leases and idempotency expiry.
-Worker writes are fenced by (status='PROCESSING', claim_token) so a worker that
-no longer owns a job cannot change it.
+Worker writes are fenced by (status='PROCESSING', claim_token, unexpired lease):
+a worker that no longer owns a job, or whose lease has lapsed, cannot change it.
+Once a lease lapses only recovery may touch the row.
 """
 
 import uuid
@@ -23,6 +24,7 @@ from app.schemas import JobCreate
 CANCELLABLE_STATUSES = (JobStatus.PENDING, JobStatus.SCHEDULED)
 MAX_ERROR_LENGTH = 2000
 RELEASE_BATCH_SIZE = 100
+RECOVERY_BATCH_SIZE = 100
 
 
 class InvalidScheduleError(ValueError):
@@ -349,6 +351,59 @@ def update_progress(session: Session, job_id: uuid.UUID, token: uuid.UUID, progr
     return _fenced_update(session, job_id, token, {"progress": progress}) is not None
 
 
+def renew_lease(session: Session, job_id: uuid.UUID, token: uuid.UUID, lease: timedelta) -> bool:
+    """Heartbeat: extend a live lease. False means ownership is gone; stop working."""
+    values = {"lease_expires_at": func.now() + lease}
+    return _fenced_update(session, job_id, token, values) is not None
+
+
+def recover_expired_leases(
+    session: Session, retry_delays: tuple[timedelta, ...], limit: int = RECOVERY_BATCH_SIZE
+) -> int:
+    """Treat jobs whose lease expired (crashed, killed or hung worker) as a failed attempt.
+
+    Applies the same rule as a handler error (after_failed_attempt), so attempts and
+    backoff are counted identically. A live heartbeat needs lease_expires_at > now()
+    and this needs lease_expires_at < now(); the row lock serializes the two, so a job
+    is either renewed or recovered, never both. Clearing claim_token fences the old worker.
+    """
+    expired = (
+        select(Job.id)
+        .where(Job.status == JobStatus.PROCESSING, Job.lease_expires_at < func.now())
+        .order_by(Job.lease_expires_at)
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
+    with session.begin():
+        rows = session.execute(
+            update(Job)
+            .where(
+                Job.id.in_(expired),
+                Job.status == JobStatus.PROCESSING,
+                Job.lease_expires_at < func.now(),
+            )
+            .values(
+                **after_failed_attempt(retry_delays),
+                last_error=func.concat("lease expired (worker ", Job.worker_id, ")"),
+                updated_at=func.now(),
+            )
+            .returning(Job.id, Job.status, Job.attempts, Job.next_run_at)
+            .execution_options(synchronize_session=False)
+        ).all()
+        for row in rows:
+            session.add(
+                JobLog(
+                    job_id=row.id,
+                    level="warning",
+                    event="lease_expired",
+                    message="lease expired; attempt counted as failed",
+                    metadata_={"attempt": row.attempts},
+                )
+            )
+            session.add(_failure_log(row))
+    return len(rows)
+
+
 def complete_job(
     session: Session, job_id: uuid.UUID, token: uuid.UUID, result: dict[str, Any]
 ) -> bool:
@@ -433,7 +488,10 @@ def _fenced_update(
     values: dict[str, Any],
     log: Callable[[Row[Any]], JobLog] | None = None,
 ) -> Row[Any] | None:
-    """Apply values only while the caller still owns the job; None means ownership was lost."""
+    """Apply values only while the caller still owns the job and its lease is live.
+
+    None means ownership was lost (recovered, re-claimed, or lease expired).
+    """
     with session.begin():
         row = session.execute(
             update(Job)
@@ -441,6 +499,7 @@ def _fenced_update(
                 Job.id == job_id,
                 Job.status == JobStatus.PROCESSING,
                 Job.claim_token == token,
+                Job.lease_expires_at > func.now(),
             )
             .values(**values, updated_at=func.now())
             .returning(Job.id, Job.status, Job.attempts, Job.next_run_at)

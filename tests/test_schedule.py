@@ -81,6 +81,9 @@ def _settings(**overrides: object) -> Settings:
         "webhook_failure_rate": 0.2,
         "batch_item_delay_seconds": 0.2,
         "retry_delays_seconds": (30, 120),
+        "heartbeat_interval_seconds": 5.0,
+        "recovery_interval_seconds": 5.0,
+        "job_timeout_seconds": 60.0,
     }
     return Settings(**(values | overrides))  # type: ignore[arg-type]
 
@@ -112,10 +115,15 @@ def test_settings_reject_negative_schedule_tolerance() -> None:
         {"retry_delays_seconds": (30,)},
         {"retry_delays_seconds": (30, 120, 300)},
         {"retry_delays_seconds": (-1, 120)},
+        {"heartbeat_interval_seconds": 0},
+        {"heartbeat_interval_seconds": 30},
+        {"recovery_interval_seconds": 0},
+        {"job_timeout_seconds": 0},
     ],
     ids=[
         "poll-0", "poll-above-2", "lease-0", "rate-negative", "rate-above-1", "delay-negative",
         "retry-delays-too-few", "retry-delays-too-many", "retry-delay-negative",
+        "heartbeat-0", "heartbeat-not-below-lease", "recovery-0", "timeout-0",
     ],
 )
 def test_settings_reject_invalid_worker_values(overrides: dict[str, object]) -> None:

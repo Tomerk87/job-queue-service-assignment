@@ -21,10 +21,13 @@ class Settings:
     redis_timeout_seconds: float
     worker_id: str
     worker_poll_interval_seconds: float
-    lease_seconds: int
+    lease_seconds: float
     webhook_failure_rate: float
     batch_item_delay_seconds: float
     retry_delays_seconds: tuple[int, ...]
+    heartbeat_interval_seconds: float
+    recovery_interval_seconds: float
+    job_timeout_seconds: float
 
     def __post_init__(self) -> None:
         if self.idempotency_ttl_hours < MIN_IDEMPOTENCY_TTL_HOURS:
@@ -41,6 +44,12 @@ class Settings:
             raise ValueError("WEBHOOK_FAILURE_RATE must be in [0, 1]")
         if self.batch_item_delay_seconds < 0:
             raise ValueError("BATCH_ITEM_DELAY_SECONDS must be >= 0")
+        if not 0 < self.heartbeat_interval_seconds < self.lease_seconds:
+            raise ValueError("HEARTBEAT_INTERVAL_SECONDS must be > 0 and < LEASE_SECONDS")
+        if self.recovery_interval_seconds <= 0:
+            raise ValueError("RECOVERY_INTERVAL_SECONDS must be > 0")
+        if self.job_timeout_seconds <= 0:
+            raise ValueError("JOB_TIMEOUT_SECONDS must be > 0")
         if len(self.retry_delays_seconds) != RETRY_DELAY_COUNT or min(self.retry_delays_seconds) < 0:
             raise ValueError(f"RETRY_DELAYS_SECONDS must be {RETRY_DELAY_COUNT} non-negative integers")
 
@@ -77,9 +86,12 @@ def load_settings() -> Settings:
         redis_timeout_seconds=float(os.environ.get("REDIS_TIMEOUT_SECONDS", "0.5")),
         worker_id=os.environ.get("WORKER_ID") or f"{socket.gethostname()}-{os.getpid()}",
         worker_poll_interval_seconds=float(os.environ.get("WORKER_POLL_INTERVAL_SECONDS", "2")),
-        lease_seconds=int(os.environ.get("LEASE_SECONDS", "30")),
+        lease_seconds=float(os.environ.get("LEASE_SECONDS", "30")),
         webhook_failure_rate=float(os.environ.get("WEBHOOK_FAILURE_RATE", "0.2")),
         batch_item_delay_seconds=float(os.environ.get("BATCH_ITEM_DELAY_SECONDS", "0.2")),
+        heartbeat_interval_seconds=float(os.environ.get("HEARTBEAT_INTERVAL_SECONDS", "5")),
+        recovery_interval_seconds=float(os.environ.get("RECOVERY_INTERVAL_SECONDS", "5")),
+        job_timeout_seconds=float(os.environ.get("JOB_TIMEOUT_SECONDS", "60")),
         retry_delays_seconds=tuple(
             int(part) for part in os.environ.get("RETRY_DELAYS_SECONDS", "30,120").split(",")
         ),

@@ -213,7 +213,83 @@ _Recorded 2026-10-21._
 
 ## Phase 4 — Crash Recovery and Reliability
 
-_Not run. Commands/results/coverage/commit: pending._
+_Recorded 2026-10-21._
+
+- **Branch:** `phase_4_implementation`, created by the human from `main` after PR #3 was merged (base `1c1b5fb`).
+- **Decisions approved by the human before execution:**
+  - **Timeout:** a cooperative `JOB_TIMEOUT_SECONDS` (60s) whose expiry is a normal failed attempt. As a backstop, the heartbeat stops renewing at the deadline, and if the handler is still running at deadline + lease the worker process exits (`os._exit(1)`) and Docker restarts it.
+  - **Recovery** runs in every worker's loop every `RECOVERY_INTERVAL_SECONDS`.
+  - **Lease is authority:** every fenced write also requires `lease_expires_at > now()`.
+  - **JSON logs** via `python-json-logger==3.3.0`.
+- **Implemented:**
+  - `app/jobs.py`:
+    - `_fenced_update` also requires an unexpired lease.
+    - `renew_lease` is a fenced lease extension with no log row.
+    - `recover_expired_leases` is a bounded `SKIP LOCKED` UPDATE that applies the Phase 3 `after_failed_attempt` rule, sets `last_error` to "lease expired (worker …)", and logs `lease_expired` plus `retry_scheduled` or `failed`.
+  - `app/worker.py`:
+    - A `Heartbeat` thread per job renews on its own sessions, marks the job lost on a rejected renewal or after a full lease without a successful renewal, stops renewing at the deadline, and exits the process on a hang.
+    - A guarded `ctx.sleep` raises `LostOwnership` or `JobTimeout`.
+    - `run()` calls `recover_once` on a monotonic timer.
+    - All log calls carry `event`/`job_id`/`worker_id` in `extra`.
+  - `app/logging_config.py` (new): a JSON formatter on the root logger. uvicorn's loggers are routed through it, and uvicorn's ANSI `color_message` field is excluded.
+  - `app/config.py`: heartbeat, recovery and timeout settings (validated); `LEASE_SECONDS` is now a float.
+  - Docs: README reliability section and env vars; TECHNICAL_SPEC §7 (lease-authority rule) and §9 (hang backstop); `.env.example`; Compose.
+- **Test suite:** `docker compose --profile test run --rm --build tests pytest -q --cov=app --cov-report=term-missing` → **169 passed, 0 failed, 0 skipped** (about 31s).
+  - Per file: `test_api.py` 54, `test_handlers.py` 14, `test_idempotency.py` 7, `test_process.py` 4, `test_recovery.py` 13, `test_retry.py` 13, `test_schedule.py` 27, `test_scheduling.py` 10, `test_worker.py` 27.
+  - `pyflakes app tests` reports nothing (it found one unused variable in `test_recovery.py`, which was fixed by asserting the claimed job id).
+- **Edge cases verified:**
+  - **EC-11:**
+    - An expired lease after attempt 1 → PENDING, attempts 1, `next_run_at − now()` within [28s, 30s], `last_error` "lease expired (worker test-worker)", token and lease cleared. Logs: created, claimed, lease_expired, retry_scheduled.
+    - Expiry on attempt 3 → FAILED.
+    - A live lease is never recovered.
+    - 10 concurrent recoverers on 20 expired jobs → exactly 20 recoveries.
+    - The batch limit holds (5 expired, limit 2 → 2, 2, 1, 0).
+  - **EC-12:**
+    - After recovery and a re-claim by another worker, the stale token's progress, renew, complete and fail are all rejected, while the new owner completes.
+    - A lapsed lease rejects complete, progress and renew even before recovery runs, and recovery then succeeds.
+  - **EC-13:**
+    - `renew_lease` extends a 1s lease to more than 28s.
+    - A real `Heartbeat` thread (lease 1s, interval 0.2s) kept a job safe from recovery attempted every 0.1s for 3s (3 leases), and the job then completed.
+    - After the deadline, renewals stop (the lease timestamp stops moving).
+    - A rejected renewal marks the job lost.
+    - With the DB unreachable, the job is marked lost only after a full lease without renewal.
+    - Renewal racing recovery on an expired lease (10 rounds): recovery wins, renewal is rejected.
+  - **EC-17** (real `python -m app.worker` subprocesses: lease 2s, heartbeat 0.3s, recovery 0.3s):
+    - SIGTERM mid-batch → COMPLETED 100 at attempt 1, exit 0, log order stopping < completed < stopped.
+    - SIGKILL mid-batch → the job stays PROCESSING. A second worker recovers it and completes it at attempt 2. Logs: created, claimed, lease_expired, retry_scheduled, claimed, completed.
+  - **EC-18:**
+    - *Cooperative:* a batch with a 0.25s timeout stops at the deadline (in less than 1s) → PENDING with `last_error` "JobTimeout: job exceeded 0.25s timeout".
+    - *Non-cooperative:* `tests/hung_worker.py` replaces the email handler with `time.sleep(1000)` and sets `JOB_TIMEOUT_SECONDS=1`. The process exits with code 1 in under 10s, logging a CRITICAL `handler_hung` line with the job_id, and the job is then recovered to PENDING with "lease expired (worker proc-hung)".
+    - A heartbeat that detects a lost lease stops the handler, and nothing is written.
+  - **Logs:** every worker stdout line parses as JSON with ts/level/logger/message, job lines carry `event` and `worker_id`, and the payload value never appears.
+- **Mutation checks** (in throwaway containers; the host code was not changed):
+  - With `os._exit(1)` replaced by `pass`, the hang test fails.
+  - With the `lease_expires_at > now()` fence removed, 2 recovery tests fail.
+- **Flakiness checks:**
+  - 30 repeated runs of the 34 race, heartbeat, recovery and timeout tests (`-k "concurrent or race or redis_is_down or outage or drains or wakeup or heartbeat or recover or lapsed or timeout"`) → 30 passed, 0 failed.
+  - 10 repeated runs of `tests/test_process.py` → 10 passed, 0 failed.
+- **Coverage (informational):** 99% total line coverage (672 statements, 6 missed). `jobs.py` 99%, `worker.py` 97%, `logging_config.py` 100%. Uncovered: the hang-exit lines, which run only inside the subprocess test and so aren't measured in-process; the broken-pub/sub close path; and the Phase 1 bounded-retry `RuntimeError`.
+- **Query plan:** the recovery subquery uses `Index Scan using ix_jobs_processing_lease` under `LockRows` (sequential scans disabled, because the test table is tiny).
+- **Compose smoke** (`docker compose down -v && docker compose up -d --build --wait`, then `scratchpad/smoke4.sh`; production defaults: lease 30s, heartbeat 5s, recovery 5s, retry 30s):
+  1. Worker and API logs are one JSON object per line. uvicorn's `color_message` was present on the first run, then excluded and rechecked: 0 lines.
+  2. `docker compose kill -s SIGKILL worker` mid-batch: the worker exited with 137, the job stayed PROCESSING, recovery about 30s later logged `leases_recovered` (attempt 1 → `retry_scheduled`), it was reclaimed at about t+66s (30s retry delay) and COMPLETED at attempt 2.
+  3. `docker compose stop worker` mid-batch took 9s: the job reached COMPLETED 100 at attempt 1 and the worker exited with 0.
+  4. `--scale worker=3` with 30 email jobs: all 30 COMPLETED, at most 1 claim per job, distributed 11/9/10 across the workers.
+- **Simplicity/efficiency review:**
+  - One new dependency (python-json-logger, approved).
+  - The recovery and retry rule is shared (`after_failed_attempt`), with no duplicate transition logic.
+  - The heartbeat is one short-lived thread per job using its own sessions (no session sharing). Renewal writes no log rows, so `job_logs` doesn't grow every 5s.
+  - Recovery is bounded, indexed and SKIP LOCKED.
+  - No busy loops: the heartbeat waits on an Event, recovery runs on a timer, and the idle wait is still bounded.
+- **Known limitations:**
+  - **At-least-once:** a job can run twice, e.g. a crash after its side effect but before the completion commit, or a paused worker whose lease lapsed. Fencing protects database state, not external effects.
+  - A worker busy with a job runs recovery only between jobs (jobs are bounded by the timeout).
+  - A non-cooperative hang occupies its worker until deadline + lease (about 90s by default) before it exits.
+  - The cooperative timeout fires only at handler wait points (`ctx.sleep`).
+  - The starlette TestClient `DeprecationWarning` is unchanged.
+- **Deviations:** none from the approved plan. Added beyond the plan: a test for the heartbeat during a DB outage (spec §7), and removal of uvicorn's `color_message` from the JSON logs.
+- **Commit:** Phase 4 checkpoint `c658876`; rollback point `1c1b5fb`.
+- **Approval:** human approval for Phase 4 granted on 2026-10-21; status set to COMPLETED. Phase 5 not started.
 
 ## Phase 5 — Full Integration, Edge Cases and Hardening
 

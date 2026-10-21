@@ -81,3 +81,17 @@ def time_until_next_run(job_id: str | uuid.UUID) -> timedelta:
         return conn.scalar(
             text("SELECT next_run_at - now() FROM jobs WHERE id = :id"), {"id": str(job_id)}
         )
+
+
+def expire_lease(job_id: str | uuid.UUID) -> None:
+    """Simulate a crashed worker: its lease ran out without being renewed."""
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE jobs SET lease_expires_at = now() - interval '1 second' WHERE id = :id"),
+            {"id": str(job_id)},
+        )
+
+
+def recover() -> int:
+    with SessionLocal() as session:
+        return jobs.recover_expired_leases(session, settings.retry_delays)

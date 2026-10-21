@@ -11,10 +11,11 @@ from sqlalchemy.orm import Session
 from app import jobs, notifier
 from app.config import settings
 from app.db import get_session
+from app.logging_config import configure_logging
 from app.models import Job, JobStatus, JobType
 from app.schemas import HealthOut, JobCreate, JobList, JobOut
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+configure_logging()
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Job Queue Service")
@@ -93,7 +94,7 @@ def health(session: SessionDep, response: Response) -> HealthOut:
     try:
         counts = jobs.count_by_status(session)
     except SQLAlchemyError:
-        logger.exception("health check: database unavailable")
+        logger.exception("health check: database unavailable", extra={"event": "health_db_down"})
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return HealthOut(status="unhealthy", database="down", redis=redis_state, jobs=None)
     overall = "ok" if redis_state == "ok" else "degraded"

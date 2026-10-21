@@ -4,3 +4,4 @@ SQLAlchemy==2.0.40
 psycopg[binary]==3.2.6
 alembic==1.15.2
 redis==5.2.1
+python-json-logger==3.3.0

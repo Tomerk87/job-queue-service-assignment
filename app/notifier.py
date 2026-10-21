@@ -28,9 +28,8 @@ def notify_job_created(job_id: uuid.UUID) -> None:
         _client.publish(JOB_CREATED_CHANNEL, str(job_id))
     except redis.RedisError as exc:
         logger.warning(
-            "redis notification failed (job_id=%s, error=%s); workers will find the job by polling",
-            job_id,
-            type(exc).__name__,
+            "redis notification failed; workers will find the job by polling",
+            extra={"event": "notify_failed", "job_id": str(job_id), "error": type(exc).__name__},
         )
 
 

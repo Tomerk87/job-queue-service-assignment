@@ -3,15 +3,20 @@
 PostgreSQL is the queue. Redis pub/sub only shortens the idle wait; when Redis is
 down or a message is lost, the bounded poll interval still finds every committed job.
 No database transaction or connection is held while a handler runs.
+
+Reliability: a heartbeat thread renews the job's lease while the handler runs; every
+worker periodically recovers jobs whose lease expired (crashed, killed or hung workers).
 """
 
 import logging
+import os
 import random
 import signal
 import threading
 import time
 from collections.abc import Callable
 from types import FrameType
+from typing import Any
 
 import redis
 from sqlalchemy.exc import SQLAlchemyError
@@ -20,11 +25,25 @@ from sqlalchemy.orm import Session
 from app import jobs
 from app.config import Settings, settings
 from app.db import SessionLocal
-from app.handlers import HANDLERS, HandlerContext, LostOwnership, SimulatedFailure
+from app.handlers import (
+    HANDLERS,
+    HandlerContext,
+    JobTimeout,
+    LostOwnership,
+    SimulatedFailure,
+)
+from app.logging_config import configure_logging
 from app.models import JobStatus
 from app.notifier import JOB_CREATED_CHANNEL
 
 logger = logging.getLogger("app.worker")
+
+# Expected failures are logged without a traceback; anything else gets one.
+EXPECTED_FAILURES = (SimulatedFailure, JobTimeout)
+
+
+def _context(claimed: jobs.ClaimedJob, config: Settings, event: str, **fields: Any) -> dict[str, Any]:
+    return {"event": event, "job_id": str(claimed.id), "worker_id": config.worker_id} | fields
 
 
 def run_once(
@@ -34,23 +53,54 @@ def run_once(
 
     One session serves the whole job on this thread. Each database write is its own
     short transaction, so no transaction or connection is held while the handler runs.
+    The heartbeat thread uses its own sessions.
     """
     with SessionLocal() as session:
         if released := jobs.release_due_jobs(session):
-            logger.info("released %d due scheduled job(s) (worker_id=%s)", released, config.worker_id)
+            logger.info(
+                "released due scheduled jobs",
+                extra={"event": "released", "count": released, "worker_id": config.worker_id},
+            )
         claimed = jobs.claim_next_job(session, config.worker_id, config.lease)
         if claimed is None:
             return False
         logger.info(
-            "job claimed (job_id=%s, type=%s, attempt=%d, worker_id=%s)",
-            claimed.id, claimed.type, claimed.attempts, config.worker_id,
+            "job claimed",
+            extra=_context(claimed, config, "claimed", type=claimed.type, attempt=claimed.attempts),
         )
-        if not _execute(session, claimed, config, rng, sleep):
+        deadline = time.monotonic() + config.job_timeout_seconds
+        heartbeat = Heartbeat(claimed, config, deadline)
+        heartbeat.start()
+        try:
+            guarded = _guarded_sleep(sleep, heartbeat.lost, deadline, config.job_timeout_seconds)
+            owned = _execute(session, claimed, config, rng, guarded)
+        finally:
+            heartbeat.done.set()
+            heartbeat.join()
+        if not owned:
             logger.warning(
-                "lost ownership; result not written (job_id=%s, worker_id=%s)",
-                claimed.id, config.worker_id,
+                "lost ownership; result not written", extra=_context(claimed, config, "lost_ownership")
             )
     return True
+
+
+def _guarded_sleep(
+    sleep: Callable[[float], None], lost: threading.Event, deadline: float, timeout: float
+) -> Callable[[float], None]:
+    """Handlers wait only through this: it enforces the job timeout and stops on lost ownership."""
+
+    def check() -> None:
+        if lost.is_set():
+            raise LostOwnership("lease lost")
+        if time.monotonic() >= deadline:
+            raise JobTimeout(f"job exceeded {timeout:g}s timeout")
+
+    def guarded(seconds: float) -> None:
+        check()
+        sleep(max(0.0, min(seconds, deadline - time.monotonic())))
+        check()
+
+    return guarded
 
 
 def _execute(
@@ -79,9 +129,9 @@ def _execute(
         raise  # infrastructure failure, not a job failure: leave the job to lease recovery
     except Exception as exc:  # any handler error fails the attempt; never crash the worker
         logger.warning(
-            "job attempt failed (job_id=%s, worker_id=%s, error=%s)",
-            claimed.id, config.worker_id, type(exc).__name__,
-            exc_info=not isinstance(exc, SimulatedFailure),
+            "job attempt failed",
+            extra=_context(claimed, config, "attempt_failed", error=type(exc).__name__),
+            exc_info=not isinstance(exc, EXPECTED_FAILURES),
         )
         outcome = jobs.record_failure(
             session,
@@ -94,18 +144,81 @@ def _execute(
             return False
         if outcome.status == JobStatus.FAILED:
             logger.warning(
-                "job failed permanently (job_id=%s, attempt=%d)", claimed.id, outcome.attempts
+                "job failed permanently",
+                extra=_context(claimed, config, "failed", attempt=outcome.attempts),
             )
         else:
             logger.info(
-                "retry scheduled (job_id=%s, attempt=%d, next_run_at=%s)",
-                claimed.id, outcome.attempts, outcome.next_run_at.isoformat(),
+                "retry scheduled",
+                extra=_context(
+                    claimed, config, "retry_scheduled",
+                    attempt=outcome.attempts, next_run_at=outcome.next_run_at.isoformat(),
+                ),
             )
         return True
     if not jobs.complete_job(session, claimed.id, claimed.claim_token, result):
         return False
-    logger.info("job completed (job_id=%s, worker_id=%s)", claimed.id, config.worker_id)
+    logger.info("job completed", extra=_context(claimed, config, "completed"))
     return True
+
+
+class Heartbeat(threading.Thread):
+    """Renews one job's lease, on its own sessions, until the handler returns.
+
+    Renewal stops at the job deadline so the lease can lapse. A handler that is still
+    running a full lease after its deadline cannot be stopped from Python, so the
+    process exits; Docker restarts the worker and lease recovery requeues the job.
+    """
+
+    def __init__(self, claimed: jobs.ClaimedJob, config: Settings, deadline: float) -> None:
+        super().__init__(name=f"heartbeat-{claimed.id}", daemon=True)
+        self.claimed = claimed
+        self.config = config
+        self.deadline = deadline
+        self.done = threading.Event()  # set by the worker when the handler returns
+        self.lost = threading.Event()  # set when this worker no longer owns the job
+
+    def run(self) -> None:
+        last_renewed = time.monotonic()
+        while not self.done.wait(self.config.heartbeat_interval_seconds):
+            now = time.monotonic()
+            if now >= self.deadline + self.config.lease_seconds:
+                logger.critical(
+                    "handler hung past its timeout; exiting so the worker restarts",
+                    extra=_context(self.claimed, self.config, "handler_hung"),
+                )
+                logging.shutdown()
+                os._exit(1)
+            if now >= self.deadline or self.lost.is_set():
+                continue  # stop renewing; the lease lapses and recovery takes over
+            if self._renew():
+                last_renewed = now
+            elif now - last_renewed >= self.config.lease_seconds:
+                self._mark_lost("no successful renewal within one lease")
+
+    def _renew(self) -> bool:
+        try:
+            with SessionLocal() as session:
+                renewed = jobs.renew_lease(
+                    session, self.claimed.id, self.claimed.claim_token, self.config.lease
+                )
+        except SQLAlchemyError:
+            logger.warning(
+                "heartbeat failed; will retry",
+                extra=_context(self.claimed, self.config, "heartbeat_error"),
+                exc_info=True,
+            )
+            return False
+        if not renewed:
+            self._mark_lost("lease renewal rejected")
+        return renewed
+
+    def _mark_lost(self, reason: str) -> None:
+        if not self.lost.is_set():
+            self.lost.set()
+            logger.warning(
+                "lease lost: %s", reason, extra=_context(self.claimed, self.config, "lease_lost")
+            )
 
 
 class Wakeup:
@@ -152,24 +265,44 @@ class Wakeup:
         if available == self._available:
             return
         if available:
-            logger.info("redis wake-ups active")
+            logger.info("redis wake-ups active", extra={"event": "redis_up"})
         else:
             logger.warning(
-                "redis wake-ups unavailable (%s); relying on database polling", type(exc).__name__
+                "redis wake-ups unavailable; relying on database polling",
+                extra={"event": "redis_down", "error": type(exc).__name__},
             )
         self._available = available
+
+
+def recover_once(config: Settings) -> int:
+    """Requeue (or fail) jobs whose lease expired. Safe to run on every worker."""
+    with SessionLocal() as session:
+        recovered = jobs.recover_expired_leases(session, config.retry_delays)
+    if recovered:
+        logger.warning(
+            "recovered jobs with expired leases",
+            extra={"event": "leases_recovered", "count": recovered, "worker_id": config.worker_id},
+        )
+    return recovered
 
 
 def run(stop: threading.Event, config: Settings) -> None:
     """Process jobs until `stop` is set. The current job always finishes first."""
     wakeup = Wakeup(config.redis_url, config.redis_timeout_seconds, stop)
     rng = random.Random()
+    next_recovery = 0.0
     try:
         while not stop.is_set():
             try:
+                if time.monotonic() >= next_recovery:
+                    recover_once(config)
+                    next_recovery = time.monotonic() + config.recovery_interval_seconds
                 processed = run_once(config, rng)
             except SQLAlchemyError:
-                logger.exception("database error in worker loop; retrying after poll interval")
+                logger.exception(
+                    "database error in worker loop; retrying after poll interval",
+                    extra={"event": "db_error", "worker_id": config.worker_id},
+                )
                 stop.wait(config.worker_poll_interval_seconds)
                 continue
             if not processed:
@@ -179,19 +312,23 @@ def run(stop: threading.Event, config: Settings) -> None:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    configure_logging()
     stop = threading.Event()
 
     def request_stop(signum: int, _frame: FrameType | None) -> None:
-        logger.info("received %s; finishing current job, then stopping", signal.Signals(signum).name)
+        logger.info(
+            "stop requested; finishing current job, then stopping",
+            extra={"event": "stopping", "signal": signal.Signals(signum).name,
+                   "worker_id": settings.worker_id},
+        )
         stop.set()
 
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
 
-    logger.info("worker started (worker_id=%s)", settings.worker_id)
+    logger.info("worker started", extra={"event": "started", "worker_id": settings.worker_id})
     run(stop, settings)
-    logger.info("worker stopped (worker_id=%s)", settings.worker_id)
+    logger.info("worker stopped", extra={"event": "stopped", "worker_id": settings.worker_id})
 
 
 if __name__ == "__main__":
