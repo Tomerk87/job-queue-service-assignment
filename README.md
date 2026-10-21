@@ -3,8 +3,8 @@
 Distributed background job processing: FastAPI API, PostgreSQL as the authoritative queue/state store,
 Redis as a best-effort wake-up channel, and separate Python worker processes.
 
-> Work in progress (Phase 4 of 6). Execution, retry, priority, scheduling and crash recovery work;
-> Phase 5 adds full integration hardening and Phase 6 the final documentation. See `PLAN.md`.
+> Work in progress (Phase 5 of 6). All features are implemented and integration-tested; Phase 6 adds
+> the final documentation (DECISIONS.md, AI_USAGE.md). See `PLAN.md`.
 
 ## Run
 
@@ -22,6 +22,18 @@ and Redis:
 
 ```bash
 docker compose --profile test run --rm --build tests pytest -v --cov=app --cov-report=term-missing
+```
+
+The suite includes real worker subprocesses (graceful stop, forced kill, hung handler, three
+concurrent workers, Redis outage). `EVIDENCE.md` maps every assignment test category and edge case
+(EC-01..EC-19) to its tests.
+
+A separate **manual end-to-end demo** drives the running Compose stack and prints PASS/FAIL per
+check (about 3 minutes):
+
+```bash
+docker compose up -d --build --wait
+scripts/smoke.sh
 ```
 
 ## Example requests
@@ -80,6 +92,8 @@ progress updates.
 - **Shutdown:** `docker compose stop` sends SIGTERM. The worker stops claiming and finishes the
   current job (its heartbeat keeps the lease alive) within the 30s grace period. A forced kill is
   handled by lease recovery.
+- **Database outage:** any endpoint returns `503 database unavailable` and nothing is committed, so a
+  client can safely retry (with an `idempotency_key`, a retry can never create a duplicate).
 - **Delivery guarantee:** at-least-once. A job can run more than once (e.g. after a crash right
   before its completion was saved). Real integrations need idempotent side effects.
 - **Logs:** the API and the worker write one JSON object per line (`ts`, `level`, `logger`,

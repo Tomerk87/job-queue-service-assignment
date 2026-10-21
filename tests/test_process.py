@@ -1,4 +1,4 @@
-"""Real worker processes: graceful stop, forced kill, hung handler and JSON logs (EC-17, EC-18).
+"""Real worker processes: shutdown, crash, hang, multi-worker, Redis outage (EC-14, EC-17-EC-19).
 
 Workers run as `python -m app.worker` subprocesses against the test database with
 short lease/heartbeat/recovery settings, so each scenario takes a few seconds.
@@ -14,7 +14,12 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
+import redis
 from fastapi.testclient import TestClient
+from sqlalchemy import text
+
+from app import notifier
+from app.db import engine
 
 from tests.helpers import db_row, log_events, recover, submit
 
@@ -139,3 +144,57 @@ def test_worker_logs_are_json_with_job_context_and_no_payload(client: TestClient
     assert {line["event"] for line in job_lines} >= {"claimed", "completed"}
     assert all(line["worker_id"] == "proc-logs" for line in job_lines)
     assert SECRET not in output
+
+
+def test_three_workers_complete_all_jobs_without_duplicate_claims(client: TestClient) -> None:
+    """EC-19: three real worker processes drain the queue; every job is claimed exactly once."""
+    job_ids = [submit_batch(client, items=2) for _ in range(30)]  # ~0.4s each
+    workers = [start_worker(f"proc-{n}") for n in (1, 2, 3)]
+    try:
+        wait_for(
+            lambda: all(db_row(job_id).status == "COMPLETED" for job_id in job_ids),
+            60,
+            "all 30 jobs to complete",
+        )
+    finally:
+        for worker in workers:
+            worker.send_signal(signal.SIGTERM)
+        for worker in workers:
+            worker.communicate(timeout=15)
+
+    assert [worker.returncode for worker in workers] == [0, 0, 0]
+    with engine.connect() as conn:
+        claims = dict(
+            conn.execute(
+                text("SELECT job_id::text, count(*) FROM job_logs WHERE event = 'claimed' GROUP BY job_id")
+            ).all()
+        )
+        per_worker = dict(
+            conn.execute(text("SELECT worker_id, count(*) FROM jobs GROUP BY worker_id")).all()
+        )
+    assert claims == {job_id: 1 for job_id in job_ids}
+    assert all(db_row(job_id).attempts == 1 for job_id in job_ids)
+    print(f"EC-19 distribution: {per_worker}")
+    assert len(per_worker) >= 2  # the work really was shared, not done by one process
+
+
+def test_redis_outage_end_to_end_jobs_still_complete_by_polling(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """EC-14: neither the API nor the worker can reach Redis; DB polling still runs the job."""
+    unreachable = "redis://127.0.0.1:1/0"
+    monkeypatch.setattr(
+        notifier, "_client", redis.Redis.from_url(unreachable, socket_connect_timeout=0.2)
+    )
+    job_id = submit_batch(client, items=1)
+    worker = start_worker("proc-no-redis", REDIS_URL=unreachable)
+    try:
+        wait_for(lambda: db_row(job_id).status == "COMPLETED", 15, "the job to complete")
+        worker.send_signal(signal.SIGTERM)
+        output, _ = worker.communicate(timeout=15)
+    finally:
+        worker.kill()
+
+    events = [line.get("event") for line in json_lines(output)]
+    assert "redis_down" in events
+    assert "redis_up" not in events

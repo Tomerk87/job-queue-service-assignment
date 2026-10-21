@@ -19,7 +19,7 @@ Services: FastAPI API, Python worker, PostgreSQL, Redis. Docker Compose runs all
 - PostgreSQL downtime prevents reliable progress; Redis downtime must not lose jobs.
 
 ## 3. Job API contracts
-- `POST /jobs`: validate type-specific payload, priority integer 0–10 (default 0), max_attempts fixed to 3, optional future scheduled_at (UTC timestamp), optional idempotency_key <=255 chars. New job: HTTP 201 with job representation; duplicate active key: HTTP 200 with original job; invalid: 422. Job persistence commits before best-effort Redis notification.
+- `POST /jobs`: validate type-specific payload, priority integer 0–10 (default 0), max_attempts fixed to 3, optional future scheduled_at (UTC timestamp), optional idempotency_key <=255 chars. New job: HTTP 201 with job representation; duplicate active key: HTTP 200 with original job; invalid: 422; PostgreSQL unavailable (any endpoint): HTTP 503 `database unavailable`, nothing committed. Job persistence commits before best-effort Redis notification.
 - `scheduled_at` rules (compared with DB now; timezone-aware input normalized to UTC): missing/null -> PENDING; future -> SCHEDULED; past or now within a configurable tolerance (default 30 seconds, inclusive) -> PENDING; more than the tolerance in the past -> 422; more than a configurable maximum in the future (default 365 days, inclusive) -> 422; unparseable or timezone-naive -> 422.
 - `GET /jobs/{id}`: job status, attempts, progress, result/error, timestamps; 404 when absent.
 - `GET /jobs?status=&type=&limit=&offset=`: filtered, paginated, newest first; validate bounds.

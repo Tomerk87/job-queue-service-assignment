@@ -1,6 +1,6 @@
 # Job Queue Service — Implementation Plan v1.1 (Six Phases)
 
-**Status:** IMPLEMENTATION — Phases 1–4 completed; Phase 5 not started (awaiting execution instruction). **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt. **Coding agent:** Claude Code. **Current phase:** 4.
+**Status:** IMPLEMENTATION — Phases 1–4 completed; Phase 5 in progress. **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt. **Coding agent:** Claude Code. **Current phase:** 5.
 
 ## Rules for tracking and verification
 - Each phase has `NOT STARTED | IN PROGRESS | BLOCKED | COMPLETED`, implementation checklist, tests/edge cases, quality review, and Definition of Done (DoD).
@@ -126,29 +126,29 @@
 **Execution Evidence:** see [EVIDENCE.md](EVIDENCE.md#phase-4--crash-recovery-and-reliability).
 
 ## Phase 5 — Full Integration, Edge Cases and Hardening
-**Status:** NOT STARTED
+**Status:** IN PROGRESS
 
 ### Implementation
-- [ ] Review all EC-01..EC-19 and fill actual test gaps; do not duplicate existing tests without reason.
-- [ ] Verify multi-worker Compose scaling (3 replicas) and Redis outage/fallback behavior.
-- [ ] Verify concurrent cancellation/claim, idempotency races/expiry, process crash/restart, batch progress and DB-failure handling.
-- [ ] Fix demonstrated defects and simplify only clearly unnecessary complexity.
-- [ ] Configure `pytest-cov` and document exclusions/commands; capture measured line coverage and critical-module breakdown.
+- [x] Review all EC-01..EC-19 and fill actual test gaps; do not duplicate existing tests without reason.
+- [x] Verify multi-worker Compose scaling (3 replicas) and Redis outage/fallback behavior.
+- [x] Verify concurrent cancellation/claim, idempotency races/expiry, process crash/restart, batch progress and DB-failure handling.
+- [x] Fix demonstrated defects and simplify only clearly unnecessary complexity.
+- [x] Configure `pytest-cov` and document exclusions/commands; capture measured line coverage and critical-module breakdown.
 
 ### Tests & verification
-- [ ] All six employer-required test categories pass (submission, completion, failure/retry, cancellation, idempotency, priority).
-- [ ] PostgreSQL-backed concurrency, lease, fencing and race tests pass (EC-03..EC-13 as relevant).
-- [ ] Redis outage and lost notification recovery pass (EC-14).
-- [ ] PostgreSQL failure before commit never produces false success (EC-15).
-- [ ] Batch progress, shutdown, timeout and three-worker E2E pass (EC-16..EC-19).
-- [ ] Full suite passes and actual coverage report is captured; target >=85% overall and aim >=90% critical modules, or document shortfall with rationale.
+- [x] All six employer-required test categories pass (submission, completion, failure/retry, cancellation, idempotency, priority).
+- [x] PostgreSQL-backed concurrency, lease, fencing and race tests pass (EC-03..EC-13 as relevant).
+- [x] Redis outage and lost notification recovery pass (EC-14).
+- [x] PostgreSQL failure before commit never produces false success (EC-15).
+- [x] Batch progress, shutdown, timeout and three-worker E2E pass (EC-16..EC-19).
+- [x] Full suite passes and actual coverage report is captured; target >=85% overall and aim >=90% critical modules, or document shortfall with rationale.
 
 ### Code Quality Gate
-- [ ] Review every dependency, module boundary, transaction, query/index, polling strategy, exception and log.
-- [ ] No needless framework, unused code, test bypass, flaky sleeps or speculative refactor.
+- [x] Review every dependency, module boundary, transaction, query/index, polling strategy, exception and log.
+- [x] No needless framework, unused code, test bypass, flaky sleeps or speculative refactor.
 
 ### Definition of Done
-- [ ] Full integration suite green; no unresolved critical consistency defect.
+- [x] Full integration suite green; no unresolved critical consistency defect.
 - [ ] Evidence includes test counts, coverage, failures fixed and Git checkpoint.
 - [ ] Human approves moving to Phase 6.
 
