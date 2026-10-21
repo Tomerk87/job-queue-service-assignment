@@ -3,11 +3,9 @@
 Handlers run with an injected no-op sleep, so tests are fast and deterministic.
 """
 
-import random
 import threading
 import time
 import uuid
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -25,64 +23,20 @@ from app import worker as worker_module
 from app.config import settings
 from app.db import SessionLocal, engine
 from app.jobs import ClaimedJob
-from app.worker import Wakeup, run, run_once
+from app.worker import Wakeup, run
+from tests.helpers import (
+    FAST,
+    JOBS_BY_TYPE,
+    claim,
+    db_row,
+    log_events,
+    steal_job,
+    submit,
+    work_once,
+)
 
 THREADS = 10
 UNREACHABLE_REDIS = "redis://127.0.0.1:1/0"
-FAST = replace(
-    settings, worker_id="test-worker", webhook_failure_rate=0.0, batch_item_delay_seconds=0.0
-)
-
-JOBS_BY_TYPE = {
-    "email": {"to": "user@example.com", "subject": "Hi"},
-    "webhook": {"url": "https://example.com/hook"},
-    "report": {"report_name": "monthly"},
-    "batch": {"items": [1, 2, 3]},
-}
-
-
-def no_sleep(_seconds: float) -> None:
-    return None
-
-
-def submit(client: TestClient, job_type: str = "email", **extra: Any) -> str:
-    response = client.post("/jobs", json={"type": job_type, "payload": JOBS_BY_TYPE[job_type]} | extra)
-    assert response.status_code == 201, response.text
-    return response.json()["id"]
-
-
-def work_once(config=FAST, sleep: Callable[[float], None] = no_sleep) -> bool:
-    return run_once(config, random.Random(0), sleep)
-
-
-def db_row(job_id: str | uuid.UUID) -> Any:
-    with engine.connect() as conn:
-        return conn.execute(text("SELECT * FROM jobs WHERE id = :id"), {"id": str(job_id)}).one()
-
-
-def log_events(job_id: str) -> list[str]:
-    with engine.connect() as conn:
-        return list(
-            conn.scalars(
-                text("SELECT event FROM job_logs WHERE job_id = :id ORDER BY id"), {"id": job_id}
-            )
-        )
-
-
-def claim(worker_id: str = "test-worker") -> ClaimedJob | None:
-    with SessionLocal() as session:
-        return jobs.claim_next_job(session, worker_id, settings.lease)
-
-
-def steal_job(job_id: str | uuid.UUID) -> None:
-    """Simulate another worker taking over the job by replacing its claim token."""
-    with engine.begin() as conn:
-        conn.execute(
-            text("UPDATE jobs SET claim_token = :token WHERE id = :id"),
-            {"token": str(uuid.uuid4()), "id": str(job_id)},
-        )
-
-
 # --- happy path and failure path -------------------------------------------------------------
 
 
@@ -114,21 +68,21 @@ def test_result_shapes_per_type(client: TestClient) -> None:
     assert results["batch"] == {"total": 3, "processed": 3}
 
 
-def test_failed_attempt_is_recorded_as_failed(client: TestClient) -> None:
+def test_failed_first_attempt_schedules_a_retry(client: TestClient) -> None:
     job_id = submit(client, "webhook")
 
     assert work_once(replace(FAST, webhook_failure_rate=1.0)) is True
 
     job = client.get(f"/jobs/{job_id}").json()
-    assert job["status"] == "FAILED"
+    assert job["status"] == "PENDING"
     assert job["attempts"] == 1
     assert job["last_error"].startswith("SimulatedFailure: ")
     assert job["result"] is None
     assert db_row(job_id).claim_token is None
-    assert log_events(job_id) == ["created", "claimed", "failed"]
+    assert log_events(job_id) == ["created", "claimed", "retry_scheduled"]
 
 
-def test_unexpected_handler_error_fails_job_without_crashing_worker(client: TestClient) -> None:
+def test_unexpected_handler_error_fails_attempt_without_crashing_worker(client: TestClient) -> None:
     job_id = submit(client, "email")
 
     def broken_sleep(_seconds: float) -> None:
@@ -136,7 +90,7 @@ def test_unexpected_handler_error_fails_job_without_crashing_worker(client: Test
 
     assert work_once(sleep=broken_sleep) is True
     job = client.get(f"/jobs/{job_id}").json()
-    assert (job["status"], job["last_error"]) == ("FAILED", "RuntimeError: disk on fire")
+    assert (job["status"], job["last_error"]) == ("PENDING", "RuntimeError: disk on fire")
 
 
 # --- eligibility -------------------------------------------------------------------------------
@@ -267,7 +221,7 @@ def test_writes_with_wrong_token_are_rejected(client: TestClient) -> None:
     with SessionLocal() as session:
         assert jobs.update_progress(session, claimed.id, wrong, 50) is False
         assert jobs.complete_job(session, claimed.id, wrong, {"x": 1}) is False
-        assert jobs.record_failure(session, claimed.id, wrong, "boom") is False
+        assert jobs.record_failure(session, claimed.id, wrong, "boom", settings.retry_delays) is None
     row = db_row(job_id)
     assert (row.status, row.progress, row.result, row.last_error) == ("PROCESSING", 0, None, None)
 
@@ -283,6 +237,16 @@ def test_worker_that_lost_ownership_does_not_complete_job(client: TestClient) ->
 
     row = db_row(job_id)
     assert (row.status, row.result, row.completed_at) == ("PROCESSING", None, None)
+    assert log_events(job_id) == ["created", "claimed"]
+
+
+def test_worker_that_lost_ownership_does_not_record_failure(client: TestClient) -> None:
+    job_id = submit(client, "webhook")
+
+    assert work_once(replace(FAST, webhook_failure_rate=1.0), sleep=lambda _s: steal_job(job_id)) is True
+
+    row = db_row(job_id)
+    assert (row.status, row.attempts, row.last_error) == ("PROCESSING", 1, None)
     assert log_events(job_id) == ["created", "claimed"]
 
 

@@ -72,6 +72,21 @@ def cancel_job(job_id: uuid.UUID, session: SessionDep) -> Job:
         ) from exc
 
 
+@app.post("/jobs/{job_id}/retry", response_model=JobOut)
+def retry_job(job_id: uuid.UUID, session: SessionDep) -> Job:
+    """Re-open a FAILED job as a new cycle of attempts."""
+    try:
+        job = jobs.retry_job(session, job_id)
+    except jobs.JobNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="job not found") from exc
+    except jobs.JobStateConflictError as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, detail=f"only FAILED jobs can be retried; job is {exc.status}"
+        ) from exc
+    notifier.notify_job_created(job.id)
+    return job
+
+
 @app.get("/health", response_model=HealthOut, responses={503: {"model": HealthOut}})
 def health(session: SessionDep, response: Response) -> HealthOut:
     redis_state = "ok" if notifier.redis_ok() else "down"

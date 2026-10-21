@@ -3,9 +3,8 @@
 Distributed background job processing: FastAPI API, PostgreSQL as the authoritative queue/state store,
 Redis as a best-effort wake-up channel, and separate Python worker processes.
 
-> Work in progress (Phase 2 of 6). Workers claim and execute jobs; a failed attempt is currently
-> terminal (FAILED). Retry with backoff, scheduled-job release and crash recovery arrive in later
-> phases. See `PLAN.md`.
+> Work in progress (Phase 3 of 6). Execution, retry with backoff, priority and scheduling work;
+> crash recovery (lease expiry) and graceful-shutdown hardening arrive in Phase 4. See `PLAN.md`.
 
 ## Run
 
@@ -33,6 +32,7 @@ curl -s -X POST localhost:8000/jobs -H 'content-type: application/json' \
 curl -s localhost:8000/jobs/<id>
 curl -s 'localhost:8000/jobs?status=PENDING&type=email&limit=20&offset=0'
 curl -s -X POST localhost:8000/jobs/<id>/cancel
+curl -s -X POST localhost:8000/jobs/<id>/retry     # FAILED jobs only
 curl -s localhost:8000/health
 ```
 
@@ -50,6 +50,16 @@ in a short transaction, runs the mock handler outside any transaction, and write
 result only while it still holds the job's claim token. When idle it waits for a Redis wake-up hint
 for at most `WORKER_POLL_INTERVAL_SECONDS`, then polls PostgreSQL again, so jobs are found even if
 Redis is down. On SIGTERM it finishes the current job before exiting.
+
+Before each claim, a worker moves due `SCHEDULED` jobs to `PENDING` (never early; at most one poll
+interval late). Higher `priority` is claimed first, oldest first within a priority; a running job is
+never preempted.
+
+A failed attempt is retried automatically: attempt 2 runs 30s after attempt 1 fails, attempt 3 runs
+120s after attempt 2 fails (`RETRY_DELAYS_SECONDS`), and after attempt 3 the job is `FAILED`.
+While waiting for a retry the job is `PENDING` and `last_error` shows the latest error; success clears
+it. `POST /jobs/{id}/retry` re-opens a `FAILED` job with attempts reset to 0; every attempt stays in
+the job log.
 
 Mock handlers: email sleeps 1–3s, webhook 1–2s with a `WEBHOOK_FAILURE_RATE` chance of a simulated
 failure (no HTTP request is made), report 3–5s, batch `BATCH_ITEM_DELAY_SECONDS` per item with
@@ -70,5 +80,6 @@ progress updates.
 | `LEASE_SECONDS` | `30` | Claim lease length (recovery arrives in Phase 4) |
 | `WEBHOOK_FAILURE_RATE` | `0.2` | Probability of a simulated webhook failure (0..1) |
 | `BATCH_ITEM_DELAY_SECONDS` | `0.2` | Simulated processing time per batch item |
+| `RETRY_DELAYS_SECONDS` | `30,120` | Delays before automatic attempts 2 and 3 |
 
 `docker-compose.yml` sets container values; `.env.example` lists them.

@@ -7,11 +7,12 @@ no longer owns a job cannot change it.
 """
 
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import Row, case, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -21,6 +22,7 @@ from app.schemas import JobCreate
 
 CANCELLABLE_STATUSES = (JobStatus.PENDING, JobStatus.SCHEDULED)
 MAX_ERROR_LENGTH = 2000
+RELEASE_BATCH_SIZE = 100
 
 
 class InvalidScheduleError(ValueError):
@@ -183,24 +185,68 @@ def cancel_job(session: Session, job_id: uuid.UUID) -> Job:
     The conditional UPDATE is the single arbiter against a concurrent worker claim:
     whichever statement commits first changes the status, the other matches no row.
     """
+    return _transition(
+        session,
+        job_id,
+        from_statuses=CANCELLABLE_STATUSES,
+        values={"status": JobStatus.CANCELLED},
+        event="cancelled",
+        message="job cancelled",
+        already_done=JobStatus.CANCELLED,
+    )
+
+
+def retry_job(session: Session, job_id: uuid.UUID) -> Job:
+    """Manually re-open a FAILED job as a new cycle; earlier attempts stay in job_logs."""
+    return _transition(
+        session,
+        job_id,
+        from_statuses=(JobStatus.FAILED,),
+        values={
+            "status": JobStatus.PENDING,
+            "attempts": 0,
+            "next_run_at": func.now(),
+            "last_error": None,
+            "result": None,
+            "progress": 0,
+            "started_at": None,
+            "completed_at": None,
+            "worker_id": None,
+        },
+        event="manual_retry",
+        message="manual retry: attempts reset",
+    )
+
+
+def _transition(
+    session: Session,
+    job_id: uuid.UUID,
+    from_statuses: tuple[JobStatus, ...],
+    values: dict[str, Any],
+    event: str,
+    message: str,
+    already_done: JobStatus | None = None,
+) -> Job:
+    """Conditionally move a job out of `from_statuses`; 404/409 semantics when it can't.
+
+    A job already in `already_done` is returned unchanged (idempotent repeat).
+    """
     with session.begin():
         job = session.scalars(
             update(Job)
-            .where(Job.id == job_id, Job.status.in_(CANCELLABLE_STATUSES))
-            .values(status=JobStatus.CANCELLED, updated_at=func.now())
+            .where(Job.id == job_id, Job.status.in_(from_statuses))
+            .values(**values, updated_at=func.now())
             .returning(Job),
             execution_options={"populate_existing": True},
         ).one_or_none()
         if job is not None:
-            session.add(
-                JobLog(job_id=job.id, level="info", event="cancelled", message="job cancelled")
-            )
+            session.add(JobLog(job_id=job.id, level="info", event=event, message=message))
             return job
 
         job = session.get(Job, job_id, populate_existing=True)
         if job is None:
             raise JobNotFoundError(str(job_id))
-        if job.status == JobStatus.CANCELLED:
+        if job.status == already_done:
             return job
         raise JobStateConflictError(job.status)
 
@@ -215,6 +261,35 @@ def count_by_status(session: Session) -> dict[JobStatus, int]:
 
 
 # --- worker side --------------------------------------------------------------------------
+
+
+def release_due_jobs(session: Session, limit: int = RELEASE_BATCH_SIZE) -> int:
+    """Move SCHEDULED jobs whose time has come to PENDING; returns how many were released.
+
+    Run by every worker before it claims. SKIP LOCKED lets concurrent workers release
+    disjoint rows, so each job is released exactly once and never before scheduled_at.
+    next_run_at already equals scheduled_at, so the job is immediately claimable.
+    """
+    due = (
+        select(Job.id)
+        .where(Job.status == JobStatus.SCHEDULED, Job.scheduled_at <= func.now())
+        .order_by(Job.scheduled_at)
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
+    with session.begin():
+        released = session.scalars(
+            update(Job)
+            .where(Job.id.in_(due), Job.status == JobStatus.SCHEDULED)
+            .values(status=JobStatus.PENDING, updated_at=func.now())
+            .returning(Job.id)
+            .execution_options(synchronize_session=False)
+        ).all()
+        session.add_all(
+            JobLog(job_id=job_id, level="info", event="released", message="scheduled time reached")
+            for job_id in released
+        )
+    return len(released)
 
 
 def claim_next_job(session: Session, worker_id: str, lease: timedelta) -> ClaimedJob | None:
@@ -271,45 +346,83 @@ def claim_next_job(session: Session, worker_id: str, lease: timedelta) -> Claime
 
 
 def update_progress(session: Session, job_id: uuid.UUID, token: uuid.UUID, progress: int) -> bool:
-    return _fenced_update(session, job_id, token, {"progress": progress})
+    return _fenced_update(session, job_id, token, {"progress": progress}) is not None
 
 
 def complete_job(
     session: Session, job_id: uuid.UUID, token: uuid.UUID, result: dict[str, Any]
 ) -> bool:
-    return _fenced_update(
+    row = _fenced_update(
         session,
         job_id,
         token,
         {
             "status": JobStatus.COMPLETED,
             "result": result,
+            "last_error": None,
             "progress": 100,
             "completed_at": func.now(),
             "claim_token": None,
             "lease_expires_at": None,
         },
-        log=("info", "completed", "job completed"),
+        log=lambda row: JobLog(job_id=row.id, level="info", event="completed", message="job completed"),
     )
+    return row is not None
 
 
-def record_failure(session: Session, job_id: uuid.UUID, token: uuid.UUID, error: str) -> bool:
-    """Record a failed attempt.
+def after_failed_attempt(retry_delays: tuple[timedelta, ...]) -> dict[str, Any]:
+    """The single retry rule for a failed attempt (handler error, or lease expiry in Phase 4).
 
-    Interim rule until Phase 3: every failure is terminal (FAILED). Phase 3 replaces
-    this function with the shared retry policy (retry after 30s/120s, FAILED after 3 attempts).
+    attempts was incremented at claim time. While attempts < max_attempts the job goes
+    back to PENDING, eligible again after retry_delays[attempts - 1] (30s, then 120s);
+    after the last attempt it is FAILED and next_run_at is left as it was.
     """
+    return {
+        "status": case(
+            (Job.attempts < Job.max_attempts, JobStatus.PENDING), else_=JobStatus.FAILED
+        ),
+        "next_run_at": case(
+            {attempt: func.now() + delay for attempt, delay in enumerate(retry_delays, start=1)},
+            value=Job.attempts,
+            else_=Job.next_run_at,
+        ),
+        "claim_token": None,
+        "lease_expires_at": None,
+    }
+
+
+def record_failure(
+    session: Session,
+    job_id: uuid.UUID,
+    token: uuid.UUID,
+    error: str,
+    retry_delays: tuple[timedelta, ...],
+) -> Row[Any] | None:
+    """Record a failed attempt; returns (id, status, attempts, next_run_at) or None if not owned."""
     return _fenced_update(
         session,
         job_id,
         token,
-        {
-            "status": JobStatus.FAILED,
-            "last_error": error[:MAX_ERROR_LENGTH],
-            "claim_token": None,
-            "lease_expires_at": None,
-        },
-        log=("error", "failed", "job failed"),
+        after_failed_attempt(retry_delays) | {"last_error": error[:MAX_ERROR_LENGTH]},
+        log=_failure_log,
+    )
+
+
+def _failure_log(row: Row[Any]) -> JobLog:
+    if row.status == JobStatus.FAILED:
+        return JobLog(
+            job_id=row.id,
+            level="error",
+            event="failed",
+            message="job failed permanently",
+            metadata_={"attempt": row.attempts},
+        )
+    return JobLog(
+        job_id=row.id,
+        level="warning",
+        event="retry_scheduled",
+        message="attempt failed; retry scheduled",
+        metadata_={"attempt": row.attempts, "next_run_at": row.next_run_at.isoformat()},
     )
 
 
@@ -318,11 +431,11 @@ def _fenced_update(
     job_id: uuid.UUID,
     token: uuid.UUID,
     values: dict[str, Any],
-    log: tuple[str, str, str] | None = None,
-) -> bool:
-    """Apply values only while the caller still owns the job; False means ownership was lost."""
+    log: Callable[[Row[Any]], JobLog] | None = None,
+) -> Row[Any] | None:
+    """Apply values only while the caller still owns the job; None means ownership was lost."""
     with session.begin():
-        result = session.execute(
+        row = session.execute(
             update(Job)
             .where(
                 Job.id == job_id,
@@ -330,11 +443,9 @@ def _fenced_update(
                 Job.claim_token == token,
             )
             .values(**values, updated_at=func.now())
+            .returning(Job.id, Job.status, Job.attempts, Job.next_run_at)
             .execution_options(synchronize_session=False)
-        )
-        if result.rowcount != 1:
-            return False
-        if log is not None:
-            level, event, message = log
-            session.add(JobLog(job_id=job_id, level=level, event=event, message=message))
-    return True
+        ).one_or_none()
+        if row is not None and log is not None:
+            session.add(log(row))
+    return row

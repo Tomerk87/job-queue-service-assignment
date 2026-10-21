@@ -147,7 +147,68 @@ _Recorded 2026-10-21._
 
 ## Phase 3 — Retry, Priority and Scheduling
 
-_Not run. Commands/results/coverage/commit: pending._
+_Recorded 2026-10-21._
+
+- **Branch:** `phase_3_implementation`, created by the human from `main` after PR #2 was merged (base `a6283cb`).
+- **Decisions approved by the human before execution:**
+  - The worker loop releases due SCHEDULED jobs with one conditional UPDATE before each claim; there is no separate scheduler service.
+  - `last_error` is kept while a job waits for an automatic retry and cleared on COMPLETED.
+  - From the spec: 3 attempts per cycle with 30s/120s delays (`RETRY_DELAYS_SECONDS`, configurable), then FAILED. Manual retry is allowed only from FAILED and resets attempts.
+- **Implemented:**
+  - `after_failed_attempt(retry_delays)` in `app/jobs.py` is the single retry rule: SQL `CASE` on `attempts`/`max_attempts`, delay looked up from the attempt number. It is designed so Phase 4 lease recovery can reuse it.
+  - `record_failure` is one token-fenced UPDATE that returns the outcome and logs `retry_scheduled` (warning) or `failed` (error). `_fenced_update` now returns the updated row.
+  - `release_due_jobs` updates SCHEDULED→PENDING with `id IN (SELECT ... FOR UPDATE SKIP LOCKED LIMIT 100)`, logs `released` per job, and is called by `run_once` before each claim.
+  - `cancel_job` and the new `retry_job` share `_transition`, a conditional UPDATE followed by 404/409 lookup, replacing the separate cancel implementation.
+  - `POST /jobs/{id}/retry` returns 200, 404 or 409 and sends a Redis wake-up after commit. `complete_job` now clears `last_error`.
+  - Docs: README (retry, scheduling, endpoint, env var), TECHNICAL_SPEC §5 (`last_error` rule), `.env.example`, Compose.
+  - Tests: shared worker helpers moved from `test_worker.py` to `tests/helpers.py`.
+- **Test suite:** `docker compose --profile test run --rm --build tests pytest -q --cov=app --cov-report=term-missing` → **146 passed, 0 failed, 0 skipped**.
+  - Per file: `test_api.py` 54, `test_handlers.py` 14, `test_idempotency.py` 7, `test_retry.py` 13, `test_schedule.py` 23, `test_scheduling.py` 10, `test_worker.py` 25.
+  - Phase 2 tests that expected a terminal FAILED after the first failure were updated to the new retry rule. The Phase 1 "retry route absent" test was replaced by the EC-02 retry tests. `pyflakes app tests` reports nothing.
+- **Edge cases verified:**
+  - **EC-07 priority:**
+    - Priorities 9 > 5 > 1 are claimed in that order, with FIFO among equal priority.
+    - A running low-priority job keeps its claim when a priority-10 job arrives.
+    - A high-priority job waiting for its retry delay does not block an eligible low-priority job.
+  - **EC-08 scheduling:**
+    - A job 1 hour ahead is not released, claimed or run.
+    - `scheduled_at = now()` is released (inclusive boundary) and then claimed. Logs: created → released → claimed.
+    - The worker releases and runs a due job; a cancelled scheduled job is never released.
+    - The release batch limit holds (5 due, limit 2 → 2, 2, 1, 0).
+    - 10 concurrent releasers on 20 due jobs → exactly 20 releases and 20 `released` logs.
+  - **EC-09 retry:**
+    - Attempt 1 fails → PENDING with `last_error`, and `next_run_at − now()` within [28s, 30s].
+    - An immediate claim finds nothing (not early).
+    - Attempt 2 → delay within [118s, 120s]. Attempt 3 → FAILED with `next_run_at` unchanged, and it is never retried automatically.
+    - Log sequence: created, claimed, retry_scheduled, claimed, retry_scheduled, claimed, failed.
+    - Success on attempt 2 → COMPLETED with `last_error` NULL. Configured delays (5, 7) are honored. A job waiting for a retry can be cancelled.
+    - Delays are checked against DB time and skipped with `fast_forward`; no test sleeps for production delays.
+  - **EC-10 manual retry:**
+    - FAILED → 200 PENDING with attempts 0 and `last_error`, `result`, `progress`, `started_at`, `completed_at` reset. The earlier log history is kept, plus `manual_retry`.
+    - The next run is attempt 1 and completes; a failing retry restarts the 30s backoff.
+    - Two concurrent manual retries → exactly one succeeds (one `manual_retry` log).
+  - **EC-02 remainder:** retry on PENDING, SCHEDULED, PROCESSING, COMPLETED or CANCELLED → 409 with the status unchanged; unknown id → 404.
+  - **Fencing:** a worker that loses ownership during a failing attempt records nothing (status stays PROCESSING, no `last_error`).
+- **Flakiness check:** 30 repeated runs of the 13 race, outage and wake-up tests (`-k "concurrent or race or redis_is_down or outage or drains or wakeup"`) → 30 passed, 0 failed.
+- **Coverage (informational):** 98% total line coverage (562 statements, 14 missed). `jobs.py` 99% (only the Phase 1 bounded-retry `RuntimeError`); `worker.py` 88% (`main()` signal wiring and the broken-pub/sub close path).
+- **Query plans** (`EXPLAIN` with sequential scans disabled, because the test table is tiny): the release subquery uses `Index Scan using ix_jobs_scheduled_at` under `LockRows`. The claim query is unchanged and uses `ix_jobs_pending_priority`.
+- **Compose smoke** (`docker compose down -v && docker compose up -d --build --wait`, then `scratchpad/smoke3.sh`):
+  1. A one-off worker with `WEBHOOK_FAILURE_RATE=1 RETRY_DELAYS_SECONDS=2,4` ran the webhook through PENDING 0 → PROCESSING 1 → PENDING 1 → PROCESSING 2 → PENDING 2 → PROCESSING 3 → FAILED 3. In the job log, `retry_scheduled` → next `claimed` took 2.02s, then 4.02s.
+  2. Manual retry → 200 PENDING, attempts 0, `last_error` null. A healthy worker then COMPLETED it at attempt 1 with `last_error` null. Retrying the COMPLETED job → 409 "only FAILED jobs can be retried; job is COMPLETED".
+  3. A job scheduled 8s ahead was SCHEDULED at t+4s, then COMPLETED. `started_at` was 1.76s after `scheduled_at`: not early, and within the 2s poll interval.
+  4. With no worker running, low (priority 1) was submitted before high (9). After the worker started, high started at 19:25:15.606 and low at 19:25:16.867.
+- **Simplicity/efficiency review:**
+  - No new dependencies or services.
+  - One retry rule (`after_failed_attempt`) shared by the worker and, later, recovery. One `_transition` helper for cancel and manual retry instead of two copies.
+  - The release is bounded (100 rows per call), indexed and SKIP LOCKED, so concurrent workers never block each other. It costs one indexed UPDATE per claim attempt.
+  - No new busy loops or sleeps; tests skip delays with `fast_forward` instead of sleeping.
+- **Known limitations:**
+  - A due scheduled or retrying job can start up to one poll interval (≤ 2s) late; it is never early.
+  - Continuous high-priority arrivals can starve low-priority jobs (documented; no aging).
+  - Lease expiry and crash recovery remain Phase 4.
+  - The starlette TestClient `DeprecationWarning` is unchanged.
+- **Deviations:** none from the approved plan. The retry-endpoint test placeholder from Phase 1 was replaced as planned.
+- **Commit:** the Phase 3 checkpoint is the commit that adds this entry (`git log --grep '^Phase 3:'`); rollback point `a6283cb`. The phase stays IN PROGRESS until the human approves.
 
 ## Phase 4 — Crash Recovery and Reliability
 

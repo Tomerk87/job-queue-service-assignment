@@ -343,9 +343,3 @@ def test_new_job_publishes_wakeup_after_commit(client: TestClient) -> None:
         subscriber.close()
 
     assert message is not None and message["data"].decode() == job["id"]
-
-
-def test_retry_endpoint_not_available_yet(client: TestClient) -> None:
-    """Retry is deliberately absent until Phase 3; it must not pretend to work."""
-    job = submit(client)
-    assert client.post(f"/jobs/{job['id']}/retry").status_code == 404

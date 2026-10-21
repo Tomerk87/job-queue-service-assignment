@@ -1,6 +1,6 @@
 # Job Queue Service — Implementation Plan v1.1 (Six Phases)
 
-**Status:** IMPLEMENTATION — Phases 1–2 completed; Phase 3 not started (awaiting execution instruction). **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt. **Coding agent:** Claude Code. **Current phase:** 2.
+**Status:** IMPLEMENTATION — Phases 1–2 completed; Phase 3 in progress. **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt. **Coding agent:** Claude Code. **Current phase:** 3.
 
 ## Rules for tracking and verification
 - Each phase has `NOT STARTED | IN PROGRESS | BLOCKED | COMPLETED`, implementation checklist, tests/edge cases, quality review, and Definition of Done (DoD).
@@ -70,29 +70,29 @@
 **Execution Evidence:** see [EVIDENCE.md](EVIDENCE.md#phase-2--worker-and-mock-execution).
 
 ## Phase 3 — Retry, Priority and Scheduling
-**Status:** NOT STARTED
+**Status:** IN PROGRESS
 
 ### Implementation
-- [ ] Release due SCHEDULED jobs atomically; no early execution.
-- [ ] Order eligible claims by priority DESC and created_at ASC.
-- [ ] Implement exactly three started attempts and 30s/120s production retry delays (test-configurable).
-- [ ] Persist failure/error and terminal FAILED; implement manual retry reset from FAILED only.
-- [ ] Keep shared retry logic usable by future crash recovery.
+- [x] Release due SCHEDULED jobs atomically; no early execution.
+- [x] Order eligible claims by priority DESC and created_at ASC.
+- [x] Implement exactly three started attempts and 30s/120s production retry delays (test-configurable).
+- [x] Persist failure/error and terminal FAILED; implement manual retry reset from FAILED only.
+- [x] Keep shared retry logic usable by future crash recovery.
 
 ### Tests & verification
-- [ ] High priority wins among eligible jobs; equal-priority tie break (EC-07).
-- [ ] Scheduled job never runs early and runs when due (EC-08).
-- [ ] Deterministic injected failures validate 30s/120s and terminal failure after attempt 3 (EC-09).
-- [ ] Manual retry resets attempts, clears transient result/error, preserves logs (EC-10).
-- [ ] Invalid retry states return 409 (EC-02 remainder).
+- [x] High priority wins among eligible jobs; equal-priority tie break (EC-07).
+- [x] Scheduled job never runs early and runs when due (EC-08).
+- [x] Deterministic injected failures validate 30s/120s and terminal failure after attempt 3 (EC-09).
+- [x] Manual retry resets attempts, clears transient result/error, preserves logs (EC-10).
+- [x] Invalid retry states return 409 (EC-02 remainder).
 
 ### Code Quality Gate
-- [ ] Retry logic is centralized, easy to reason about, and does not use production-duration sleeps in tests.
-- [ ] Eligibility query and indexes align; no unnecessary scheduler service.
+- [x] Retry logic is centralized, easy to reason about, and does not use production-duration sleeps in tests.
+- [x] Eligibility query and indexes align; no unnecessary scheduler service.
 
 ### Definition of Done
-- [ ] All new transition and retry tests pass with evidence.
-- [ ] No critical open defect; update evidence and Git checkpoint.
+- [x] All new transition and retry tests pass with evidence.
+- [x] No critical open defect; update evidence and Git checkpoint.
 - [ ] Human approves moving to Phase 4.
 
 **Execution Evidence:** see [EVIDENCE.md](EVIDENCE.md#phase-3--retry-priority-and-scheduling).
