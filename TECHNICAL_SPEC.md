@@ -27,7 +27,7 @@ Services: FastAPI API, Python worker, PostgreSQL, Redis. Docker Compose runs all
 - `POST /jobs/{id}/retry`: only FAILED can retry; atomically reset attempts to 0, error/result/progress as appropriate, next_run_at=now, status=PENDING; 409 otherwise, 404 missing. Retain history in job logs.
 - `GET /health`: API/database availability and counts by job state, plus Redis status. Distinguish degraded Redis from failed database. Never report overall healthy if the database is unreachable.
 
-Suggested request payloads (final validation schemas may be narrow and documented): email {to, subject, body?}; webhook {url, body?} **simulation only, never send an HTTP request**; report {report_name}; batch {items: nonempty array}. Mock handlers return JSON results. Never expose internal claim_token in public responses.
+Suggested request payloads (final validation schemas may be narrow and documented): email {to, subject, body?}; webhook {url, body?} **simulation only, never send an HTTP request**; report {report_name}; batch {items: array of 1..100 items}. Mock handlers return JSON results. Never expose internal claim_token in public responses.
 
 ## 4. Persistence
 ### jobs

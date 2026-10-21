@@ -1,6 +1,6 @@
 # Job Queue Service — Implementation Plan v1.1 (Six Phases)
 
-**Status:** IMPLEMENTATION — Phase 1 completed; Phase 2 not started (awaiting execution instruction). **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt; estimates are active engineering hours. **Coding agent:** Claude Code. **Current phase:** 1.
+**Status:** IMPLEMENTATION — Phase 1 completed; Phase 2 in progress. **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt; estimates are active engineering hours. **Coding agent:** Claude Code. **Current phase:** 2.
 
 ## Rules for tracking and verification
 - Each phase has `NOT STARTED | IN PROGRESS | BLOCKED | COMPLETED`, implementation checklist, tests/edge cases, quality review, and Definition of Done (DoD).
@@ -98,32 +98,87 @@
 - **Commit:** `d659188` on branch `phase_1_implementation` (Phase 1 checkpoint; rollback point `810444a`). Human approval for Phase 1 granted on 2026-10-21; status set to COMPLETED.
 
 ## Phase 2 — Worker and Mock Execution
-**Status:** NOT STARTED | **Estimate:** 5–7 active hours
+**Status:** IN PROGRESS | **Estimate:** 5–7 active hours
 
 ### Implementation
-- [ ] Implement atomic PostgreSQL claim using `FOR UPDATE SKIP LOCKED` and a fresh claim token.
-- [ ] Implement bounded worker polling, best-effort Redis wake-up, and worker ID.
-- [ ] Implement four mock handlers (email, webhook, report, batch) with deterministic test injection.
-- [ ] Persist result/error and token-fenced progress/completion; keep handler execution outside transactions.
-- [ ] Keep DB sessions isolated per worker/thread.
+- [x] Implement atomic PostgreSQL claim using `FOR UPDATE SKIP LOCKED` and a fresh claim token.
+- [x] Implement bounded worker polling, best-effort Redis wake-up, and worker ID.
+- [x] Implement four mock handlers (email, webhook, report, batch) with deterministic test injection.
+- [x] Persist result/error and token-fenced progress/completion; keep handler execution outside transactions.
+- [x] Keep DB sessions isolated per worker/thread.
 
 ### Tests & verification
-- [ ] Submit -> claim -> execute -> COMPLETED persists result via API (E2E happy path).
-- [ ] Two concurrent workers cannot claim the same job (EC-06, real PostgreSQL).
-- [ ] Cancellation and claim are atomic, at least baseline race test (EC-05).
-- [ ] Batch progress and summary are correct (EC-16 baseline).
-- [ ] Lost Redis wake-up does not strand committed jobs (EC-14 baseline).
+- [x] Submit -> claim -> execute -> COMPLETED persists result via API (E2E happy path).
+- [x] Two concurrent workers cannot claim the same job (EC-06, real PostgreSQL).
+- [x] Cancellation and claim are atomic, at least baseline race test (EC-05).
+- [x] Batch progress and summary are correct (EC-16 baseline).
+- [x] Lost Redis wake-up does not strand committed jobs (EC-14 baseline).
 
 ### Code Quality Gate
-- [ ] Handler boundaries are explicit; no long transaction or busy loop; no duplicated persistence logic.
-- [ ] Code is readable and interview-explainable; worker and handler tests deterministic.
+- [x] Handler boundaries are explicit; no long transaction or busy loop; no duplicated persistence logic.
+- [x] Code is readable and interview-explainable; worker and handler tests deterministic.
 
 ### Definition of Done
-- [ ] Worker happy path and concurrent claim integration pass with evidence.
-- [ ] No critical open defect; update evidence and Git checkpoint.
+- [x] Worker happy path and concurrent claim integration pass with evidence.
+- [x] No critical open defect; update evidence and Git checkpoint.
 - [ ] Human approves moving to Phase 3.
 
-**Execution Evidence:** _Not run. Commands/results/coverage/commit: pending._
+**Execution Evidence (2026-10-21):**
+- **Branch:** `phase_2_implementation`, created by the human from `main` after PR #1 was merged (base `1b48a44`).
+- **Decisions approved by the human before execution:**
+  - Until Phase 3, a handler error is terminal: PROCESSING → FAILED, token-fenced, through `record_failure`, which Phase 3 replaces with the retry policy.
+  - Webhook determinism comes from an injectable `random.Random`/`sleep` plus `WEBHOOK_FAILURE_RATE`.
+  - Batch is capped at 100 items with 0.2s per item, so a job takes ≤ 20s, under the 30s lease. This changes the Phase 1 limit of 1000.
+  - The happy path is tested in-process against real PostgreSQL, plus a Compose smoke run; automated Compose E2E stays in Phase 5.
+  - The claim orders by `priority DESC, created_at ASC` now. The Phase 3 checkbox and EC-07 are still verified in Phase 3.
+- **Test suite:** `docker compose --profile test run --rm --build tests pytest -q --cov=app --cov-report=term-missing` → **113 passed, 0 failed, 0 skipped** (3.88s).
+  - Per file: `test_api.py` 53, `test_handlers.py` 14, `test_idempotency.py` 7, `test_schedule.py` 17, `test_worker.py` 22.
+  - New in Phase 2: batch 100 items accepted and 101 rejected; worker config bounds; handler units; worker integration.
+- **Edge cases verified:**
+  - **Happy path:** submit via API → `run_once` → COMPLETED for all 4 types, with result, progress 100, attempts 1, worker_id and timestamps. Token and lease are cleared. Logs: created → claimed → completed.
+  - **Failure:** a simulated webhook failure or an unexpected handler exception → FAILED with `last_error`, and the worker keeps running.
+  - **EC-06:**
+    - 10 threads behind a barrier race for 1 job → exactly 1 claim.
+    - 10 threads drain 30 jobs → 30 unique claims, each at attempt 1.
+  - **EC-05:** 20 rounds of a cancel-vs-claim barrier race → exactly one winner each round, and the final status matches the winner.
+  - **EC-16:** batch progress is monotonic and ends at 100 (unit tests for 1, 3, 7 and 100 items). Persisted progress observed mid-run was 0/20/40/60/80, then the job completed with `{total, processed}`.
+  - **EC-14:**
+    - With Redis unreachable for both API and worker, the real `run()` loop completes the job by polling.
+    - `Wakeup` returns early on a notification, and falls back to a timed wait when Redis is down.
+  - **Fencing baseline:** progress, complete and failure with a wrong token are rejected and leave the row unchanged. A worker whose token was replaced does not complete the job, and a batch stops at the rejected progress write.
+  - **Ineligible jobs:** SCHEDULED, CANCELLED and future-`next_run_at` jobs are never claimed.
+  - **DB outage:** the worker loop logs the error and retries about every poll interval, with no crash and no busy loop.
+- **Flakiness check:** 30 repeated runs of the 8 race/outage tests (`pytest -q -k "concurrent or race or redis_is_down or outage"`) → 30 passed, 0 failed.
+- **Coverage (informational):** 97% total line coverage (513 statements, 14 missed).
+  - `handlers.py` 100%.
+  - `jobs.py` 99%; the only uncovered line is the Phase 1 bounded-retry `RuntimeError`.
+  - `worker.py` 88%. Uncovered are `main()` signal wiring (exercised by the smoke run) and the error path of closing a broken pub/sub connection.
+- **Query plan:** `EXPLAIN` of the claim subquery shows `Index Scan using ix_jobs_pending_priority` under `LockRows`. Sequential scans had to be disabled to show it, because the test table is tiny.
+- **Compose smoke** (`docker compose down -v && docker compose up -d --build --wait`, then `scratchpad/smoke2.sh`):
+  1. Email, webhook and report → COMPLETED at attempt 1 with worker_id `8940d33dddfa-1`.
+  2. A 100-item batch was polled every 3s at progress 14 → 29 → 44 → 59 → 73 → 88 → COMPLETED 100 `{total: 100, processed: 100}`.
+  3. With the worker stopped, a cancel returned 200, and the job stayed CANCELLED after the worker restarted.
+  4. A one-off worker with `WEBHOOK_FAILURE_RATE=1` turned the webhook to FAILED with `SimulatedFailure: ...`.
+  5. With Redis stopped, a report job still COMPLETED, and the worker logged "redis wake-ups unavailable (ConnectionError); relying on database polling".
+  6. `docker compose stop worker` during a 40-item batch logged SIGTERM. The job went from progress 5 to COMPLETED 100 before exit, the stop took 9s (within the 30s grace period), and the worker exited with code 0.
+- **Simplicity/efficiency review:**
+  - No new dependencies.
+  - All state transitions remain in `app/jobs.py`: claim, a single `_fenced_update` helper for progress/complete/failure, and cancel.
+  - Handlers are plain functions with a small context dataclass. `Wakeup` is the only new class; it holds pub/sub state.
+  - Each DB operation uses its own short session and transaction; no session or lock is held while a handler runs.
+  - Idle wait is bounded by `WORKER_POLL_INTERVAL_SECONDS` (≤ 2s). On DB errors the loop waits a poll interval.
+  - Logs contain job_id, worker_id and exception type, never payloads.
+- **Known limitations:**
+  - If the final complete or failure write fails because the DB is down, the job stays PROCESSING until Phase 4 lease recovery.
+  - Leases are set but not renewed or recovered (Phase 4).
+  - A batch writes one short progress transaction per item (at most 100).
+  - The starlette TestClient `DeprecationWarning` is unchanged.
+- **Deviations:**
+  - Failures are terminal until Phase 3.
+  - The batch limit changed from 1000 to 100: the TECHNICAL_SPEC §3 payload note and README were updated.
+  - Priority ordering was written early; it is still verified in Phase 3.
+  - Worker Compose `stop_grace_period: 30s` was added ahead of Phase 4's shutdown work.
+- **Commit:** the Phase 2 checkpoint is the commit that adds this evidence on `phase_2_implementation` (`git log --grep '^Phase 2:'`); rollback point `1b48a44`. The phase stays IN PROGRESS until the human approves.
 
 ## Phase 3 — Retry, Priority and Scheduling
 **Status:** NOT STARTED | **Estimate:** 5–7 active hours

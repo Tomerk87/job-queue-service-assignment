@@ -8,6 +8,10 @@ x-app-env: &app-env
   IDEMPOTENCY_TTL_HOURS: "24"
   SCHEDULE_PAST_TOLERANCE_SECONDS: "30"
   REDIS_TIMEOUT_SECONDS: "0.5"
+  WORKER_POLL_INTERVAL_SECONDS: "2"
+  LEASE_SECONDS: "30"
+  WEBHOOK_FAILURE_RATE: "0.2"
+  BATCH_ITEM_DELAY_SECONDS: "0.2"
 
 services:
   postgres:
@@ -65,6 +69,8 @@ services:
     image: job-queue-service:local
     environment: *app-env
     command: ["python", "-m", "app.worker"]
+    # Longer than the longest mock job (batch: 100 items x 0.2s = 20s) so SIGTERM can drain it.
+    stop_grace_period: 30s
     depends_on:
       migrate:
         condition: service_completed_successfully

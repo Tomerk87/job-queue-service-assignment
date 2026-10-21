@@ -78,6 +78,7 @@ INVALID_BODIES = {
     "report empty name": {"type": "report", "payload": {"report_name": ""}},
     "batch empty items": {"type": "batch", "payload": {"items": []}},
     "batch items not list": {"type": "batch", "payload": {"items": "abc"}},
+    "batch over 100 items": {"type": "batch", "payload": {"items": list(range(101))}},
     "priority below 0": EMAIL_JOB | {"priority": -1},
     "priority above 10": EMAIL_JOB | {"priority": 11},
     "priority not int": EMAIL_JOB | {"priority": "high"},
@@ -98,6 +99,11 @@ def test_invalid_submission_returns_422_and_creates_nothing(
 
     assert response.status_code == 422, response.text
     assert count_rows("jobs") == 0
+
+
+def test_batch_of_max_size_is_accepted(client: TestClient) -> None:
+    response = client.post("/jobs", json={"type": "batch", "payload": {"items": list(range(100))}})
+    assert response.status_code == 201
 
 
 def test_idempotency_key_of_max_length_is_accepted(client: TestClient) -> None:

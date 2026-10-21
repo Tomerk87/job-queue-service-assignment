@@ -1,4 +1,4 @@
-"""Unit tests for initial scheduling rules and configuration bounds (EC-01)."""
+"""Unit tests for initial scheduling rules (EC-01) and configuration bounds."""
 
 from datetime import datetime, timedelta, timezone
 
@@ -63,6 +63,11 @@ def _settings(**overrides: object) -> Settings:
         "idempotency_ttl_hours": 24,
         "schedule_past_tolerance_seconds": 30,
         "redis_timeout_seconds": 0.5,
+        "worker_id": "test-worker",
+        "worker_poll_interval_seconds": 2.0,
+        "lease_seconds": 30,
+        "webhook_failure_rate": 0.2,
+        "batch_item_delay_seconds": 0.2,
     }
     return Settings(**(values | overrides))  # type: ignore[arg-type]
 
@@ -75,3 +80,25 @@ def test_settings_reject_idempotency_ttl_below_24_hours() -> None:
 def test_settings_reject_negative_schedule_tolerance() -> None:
     with pytest.raises(ValueError):
         _settings(schedule_past_tolerance_seconds=-1)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"worker_poll_interval_seconds": 0},
+        {"worker_poll_interval_seconds": 2.5},
+        {"lease_seconds": 0},
+        {"webhook_failure_rate": -0.1},
+        {"webhook_failure_rate": 1.1},
+        {"batch_item_delay_seconds": -1},
+    ],
+    ids=["poll-0", "poll-above-2", "lease-0", "rate-negative", "rate-above-1", "delay-negative"],
+)
+def test_settings_reject_invalid_worker_values(overrides: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        _settings(**overrides)
+
+
+def test_settings_accept_boundary_worker_values() -> None:
+    config = _settings(worker_poll_interval_seconds=2, webhook_failure_rate=1, batch_item_delay_seconds=0)
+    assert config.lease.total_seconds() == 30
