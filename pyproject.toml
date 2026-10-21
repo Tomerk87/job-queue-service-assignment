@@ -11,7 +11,10 @@ pythonpath = ["."]
 addopts = "-p no:cacheprovider"
 
 [tool.coverage.run]
+# Only application code is measured; alembic/ (migrations) and tests/ are outside "app".
 source = ["app"]
 
 [tool.coverage.report]
 show_missing = true
+# Pure entrypoint boilerplate; the code it calls (worker.main) is still measured.
+exclude_also = ['if __name__ == .__main__.:']

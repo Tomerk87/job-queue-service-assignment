@@ -1,4 +1,4 @@
-"""API contract tests against real PostgreSQL and Redis (EC-01, EC-02)."""
+"""API contract tests against real PostgreSQL and Redis (EC-01, EC-02, EC-15)."""
 
 from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
@@ -7,12 +7,13 @@ from typing import Any
 import pytest
 import redis
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app import notifier
 from app.config import settings
-from app.db import engine, get_session
+from app.db import SessionLocal, engine, get_session
 from app.main import app
 from app.models import JobStatus
 from tests.conftest import count_rows, set_status
@@ -343,3 +344,85 @@ def test_new_job_publishes_wakeup_after_commit(client: TestClient) -> None:
         subscriber.close()
 
     assert message is not None and message["data"].decode() == job["id"]
+
+
+# --- PostgreSQL failure never acknowledged as success (EC-15) --------------------------------------
+
+
+@pytest.fixture
+def notifications(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    sent: list[Any] = []
+    monkeypatch.setattr(notifier, "notify_job_created", sent.append)
+    return sent
+
+
+@pytest.fixture
+def database_unreachable() -> Iterator[None]:
+    dead_engine = create_engine("postgresql+psycopg://nobody:nothing@127.0.0.1:1/none")
+
+    def dead_session() -> Iterator[Session]:
+        with Session(dead_engine) as session:
+            yield session
+
+    app.dependency_overrides[get_session] = dead_session
+    yield
+    app.dependency_overrides.clear()
+    dead_engine.dispose()
+
+
+def test_submit_returns_503_when_database_is_unreachable(
+    client: TestClient, database_unreachable: None, notifications: list[Any]
+) -> None:
+    response = client.post("/jobs", json=EMAIL_JOB | {"idempotency_key": "outage-1"})
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "database unavailable"}
+    assert notifications == []  # no wake-up for a job that does not exist
+    assert count_rows("jobs") == 0
+
+
+@pytest.mark.parametrize(
+    "method, path",
+    [
+        ("GET", "/jobs/00000000-0000-0000-0000-000000000000"),
+        ("GET", "/jobs"),
+        ("POST", "/jobs/00000000-0000-0000-0000-000000000000/cancel"),
+        ("POST", "/jobs/00000000-0000-0000-0000-000000000000/retry"),
+    ],
+)
+def test_other_endpoints_return_503_when_database_is_unreachable(
+    client: TestClient, database_unreachable: None, method: str, path: str
+) -> None:
+    response = client.request(method, path)
+    assert (response.status_code, response.json()) == (503, {"detail": "database unavailable"})
+
+
+def test_failed_commit_is_never_acknowledged(
+    client: TestClient, notifications: list[Any]
+) -> None:
+    """The connection drops at COMMIT: the client gets 503 and nothing is persisted."""
+
+    def session_failing_at_commit() -> Iterator[Session]:
+        with SessionLocal() as session:
+
+            @event.listens_for(session, "before_commit")
+            def connection_lost(_session: Session) -> None:
+                raise OperationalError("COMMIT", {}, Exception("server closed the connection"))
+
+            yield session
+
+    app.dependency_overrides[get_session] = session_failing_at_commit
+    try:
+        response = client.post("/jobs", json=EMAIL_JOB | {"idempotency_key": "commit-fails"})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 503
+    assert notifications == []
+    assert (count_rows("jobs"), count_rows("idempotency_keys"), count_rows("job_logs")) == (0, 0, 0)
+
+    # The client's retry with the same key succeeds once the database is healthy again.
+    retry = client.post("/jobs", json=EMAIL_JOB | {"idempotency_key": "commit-fails"})
+    assert retry.status_code == 201
+    assert len(notifications) == 1
+    assert count_rows("jobs") == 1

@@ -293,7 +293,98 @@ _Recorded 2026-10-21._
 
 ## Phase 5 — Full Integration, Edge Cases and Hardening
 
-_Not run. Commands/results/coverage/commit: pending._
+_Recorded 2026-10-21._
+
+- **Branch:** `phase_5_implementation`, created by the human from `main` after PR #4 was merged (base `386668d`). **Not committed:** per the human's instruction, changes stay uncommitted until explicitly requested.
+- **Decisions approved by the human before execution:**
+  - End-to-end tests run with real worker subprocesses, plus a committed manual Compose demo `scripts/smoke.sh`.
+  - An unavailable database returns **503** on every endpoint (reversing the Phase 1 choice to keep 500).
+  - No CI workflow.
+- **Gap review:** EC-01–EC-13 and EC-16–EC-18 were already covered by automated tests. The gaps were EC-15 (no automated test), EC-19 (manual evidence only), EC-14 (in-process only, while the spec asks for end-to-end), and the undocumented coverage configuration and test-category mapping. All are closed below.
+- **Implemented:**
+  - `app/main.py`: an `OperationalError` exception handler → 503 `{"detail": "database unavailable"}`, logged with `event=db_unavailable`; `/health` keeps its own 503 body.
+  - Docs: TECHNICAL_SPEC §3 (503 rule); README (test section, smoke demo, DB-outage note, status line).
+  - `pyproject.toml`: coverage `source = ["app"]` (migrations and tests excluded by location) and `exclude_also = ['if __name__ == .__main__.:']` (entrypoint boilerplate only). Both are documented in comments.
+  - New `scripts/smoke.sh`: 10 steps and 30 PASS/FAIL checks, with a non-zero exit on failure.
+- **New tests:**
+  - **EC-15** (`tests/test_api.py`):
+    - DB unreachable → `POST /jobs` returns 503 with no row and no Redis notification.
+    - GET, list, cancel and retry also return 503.
+    - The connection dropping at COMMIT (`before_commit` raises `OperationalError`) → 503 with 0 jobs, keys and logs and no notification; a retry with the same idempotency key afterwards → 201.
+  - **EC-19** (`tests/test_process.py`): 3 real worker processes and 30 batch jobs → all COMPLETED at attempt 1, exactly 1 `claimed` log per job, all workers exit 0, and at least 2 workers used.
+  - **EC-14** (`tests/test_process.py`): API notifier and worker both pointed at an unreachable Redis → the job COMPLETES by polling, and the worker logs `redis_down` but never `redis_up`.
+- **Test suite:** `docker compose --profile test run --rm --build tests pytest -v --cov=app --cov-report=term-missing` → **177 passed, 0 failed, 0 skipped** (38.7s).
+  - Per file: `test_api.py` 60, `test_handlers.py` 14, `test_idempotency.py` 7, `test_process.py` 6, `test_recovery.py` 13, `test_retry.py` 13, `test_schedule.py` 27, `test_scheduling.py` 10, `test_worker.py` 27.
+  - `pyflakes app tests`: exit 0.
+- **Flakiness checks:**
+  - 30 repeated runs of the 38 in-process race, heartbeat, recovery, timeout and failure tests → 30 passed, 0 failed.
+  - 10 repeated runs of `tests/test_process.py` (6 tests) → 10 passed, 0 failed. The EC-19 distribution was `{proc-1: 10, proc-2: 10, proc-3: 10}` in all 10 runs.
+- **Coverage (measured with the command above):** **99%** total line coverage (675 statements, 6 missed). The target is ≥ 85%, so it is met.
+  - Critical modules, target ≥ 90%:
+    - `app/jobs.py` (claim, state transitions, retry rule, idempotency, lease recovery): **99%** (151/152). The miss is line 111, the bounded idempotency-retry `RuntimeError`, which is unreachable unless a key's TTL is shorter than one request.
+    - `app/worker.py` (worker loop, heartbeat, recovery timer): **97%** (177/182). The misses are lines 186–191, the hang `os._exit`, which is exercised by the subprocess test `test_hung_handler_exits_worker_and_job_is_recovered` and not measured in-process; and lines 260–261, closing an already-broken pub/sub connection.
+  - All other modules: 100%.
+  - Exclusions: only `if __name__ == "__main__":` blocks. Migrations and tests are outside `source`.
+- **Assignment's six required test categories:**
+
+  | Category | Tests |
+  |---|---|
+  | Job submission and retrieval | `test_api.py::test_submit_and_get_each_job_type` (4 types), `test_list_is_newest_first_and_paginated`, `test_list_filters_by_status_and_type` |
+  | Job completion flow | `test_worker.py::test_submitted_job_is_claimed_executed_and_completed` (4 types), `test_result_shapes_per_type`; `test_process.py::test_sigterm_finishes_running_job_then_exits_cleanly` |
+  | Job failure and retry | `test_retry.py::test_three_attempts_with_30s_and_120s_backoff_then_failed`, `test_success_on_retry_completes_and_clears_last_error`, `test_manual_retry_resets_attempts_and_keeps_history` |
+  | Cancellation | `test_api.py::test_cancel_pending_job`, `test_cancel_scheduled_job`, `test_cancel_in_non_cancellable_state_returns_409`; `test_worker.py::test_cancel_and_claim_race_has_exactly_one_winner` |
+  | Idempotency | `test_idempotency.py::test_same_key_returns_original_job`, `test_concurrent_same_key_creates_exactly_one_job`, `test_concurrent_reuse_of_expired_key_creates_exactly_one_new_job` |
+  | Priority ordering | `test_scheduling.py::test_higher_priority_is_claimed_first`, `test_equal_priority_is_first_in_first_out`, `test_running_job_is_not_preempted_by_higher_priority` |
+
+- **Edge-case matrix:**
+
+  | EC | Tests |
+  |---|---|
+  | EC-01 | `test_api.py::test_invalid_submission_returns_422_and_creates_nothing` (19 cases), scheduled_at API tests; `test_schedule.py` boundary and config tests |
+  | EC-02 | `test_api.py` get/cancel 404 and cancel 409; `test_retry.py::test_retry_in_non_failed_state_returns_409` (5), `test_retry_unknown_job_returns_404` |
+  | EC-03 | `test_idempotency.py::test_concurrent_same_key_creates_exactly_one_job` |
+  | EC-04 | `test_idempotency.py::test_expired_key_creates_new_job_and_keeps_old_one`, `test_concurrent_reuse_of_expired_key_creates_exactly_one_new_job` |
+  | EC-05 | `test_worker.py::test_cancel_and_claim_race_has_exactly_one_winner` (20 rounds) |
+  | EC-06 | `test_worker.py::test_concurrent_workers_cannot_claim_the_same_job`, `test_concurrent_workers_drain_queue_without_duplicates` |
+  | EC-07 | `test_scheduling.py` priority tests (4) |
+  | EC-08 | `test_scheduling.py` release tests (6), including `test_concurrent_release_releases_each_job_once` |
+  | EC-09 | `test_retry.py` automatic-retry tests (4) |
+  | EC-10 | `test_retry.py` manual-retry tests (3) |
+  | EC-11 | `test_recovery.py` recovery tests (5) |
+  | EC-12 | `test_recovery.py::test_stale_worker_cannot_write_after_recovery_and_reclaim`, `test_lapsed_lease_rejects_writes_even_before_recovery`; `test_worker.py` fencing tests |
+  | EC-13 | `test_recovery.py` heartbeat tests (6) |
+  | EC-14 | `test_worker.py::test_job_submitted_while_redis_is_down_is_processed_by_polling`, wake-up tests; `test_process.py::test_redis_outage_end_to_end_jobs_still_complete_by_polling` |
+  | EC-15 | `test_api.py::test_submit_returns_503_when_database_is_unreachable`, `test_other_endpoints_return_503_when_database_is_unreachable` (4), `test_failed_commit_is_never_acknowledged` |
+  | EC-16 | `test_handlers.py` batch tests; `test_worker.py::test_batch_progress_is_persisted_monotonically` |
+  | EC-17 | `test_process.py::test_sigterm_finishes_running_job_then_exits_cleanly`, `test_sigkill_mid_job_is_recovered_and_completed_by_another_worker` |
+  | EC-18 | `test_worker.py::test_job_past_its_timeout_fails_the_attempt_and_is_retried`; `test_process.py::test_hung_handler_exits_worker_and_job_is_recovered` |
+  | EC-19 | `test_process.py::test_three_workers_complete_all_jobs_without_duplicate_claims`; `scripts/smoke.sh` step 10 |
+  | EC-20 | Phase 6 (fresh-environment run) |
+
+- **Manual Compose demo** (`docker compose down -v && docker compose up -d --build --wait && scripts/smoke.sh`): **ALL CHECKS PASSED** (30/30, exit 0, 2 min 18 s). It covered all job types, idempotency, cancel, failure → retries → FAILED → manual retry → 409 on COMPLETED, priority, scheduling, Redis down (`degraded` and still processed), SIGTERM drain (exit 0), SIGKILL recovery (attempt 2 with `lease_expired` logged), and 3 workers (15 jobs, max 1 claim per job, split 5/5/5).
+- **Quality-gate review (whole codebase):**
+  - *Dependencies:* runtime packages are fastapi, uvicorn, SQLAlchemy, psycopg, alembic, redis and python-json-logger; dev packages are pytest, pytest-cov and httpx. All are used. Pinning transitive dependencies remains a Phase 6 item.
+  - *Module boundaries:* routes (`main`), schemas, persistence and all state transitions (`jobs`), handlers, worker loop (`worker`), notifier, config and logging. There is no duplicated transition logic: cancel and retry share `_transition`, and handler failure and lease expiry share `after_failed_attempt`.
+  - *Transactions:* every write is one short `session.begin()` block. No transaction or connection is held while a handler runs, and the heartbeat uses its own sessions.
+  - *Queries vs. indexes* (`EXPLAIN` with sequential scans disabled):
+    - claim → `ix_jobs_pending_priority`; release → `ix_jobs_scheduled_at`; recovery → `ix_jobs_processing_lease`;
+    - unfiltered list → `ix_jobs_created`; status/type lists → `ix_jobs_status_created` / `ix_jobs_type_created` plus an incremental sort for the id tie-break;
+    - idempotency lookup → `idempotency_keys_pkey`; health counts → index-only scan on `ix_jobs_status_created`.
+  - *Polling:* the idle wait is ≤ 2s or ends early on a Redis hint (stale hints are drained); recovery runs every 5s; the heartbeat waits on an Event. No busy loops.
+  - *Exceptions:* DB unavailability → 503 in the API, and backoff in the worker. Handler errors → a failed attempt. Infrastructure errors inside handlers propagate to the loop and are left to lease recovery. Nothing is swallowed silently.
+  - *Logs:* JSON with event, job_id and worker_id; payloads are never logged (asserted in `test_worker_logs_are_json_with_job_context_and_no_payload`).
+  - *Test timing:* real sleeps exist only where the behavior is about time (heartbeat, timeout and process tests), with short configured intervals. Retry delays are skipped with `fast_forward`, never slept.
+  - **Defects found in this pass:** none. No code changes beyond the approved 503 handler.
+- **Known limitations (unchanged):**
+  - At-least-once execution; no exactly-once side effects.
+  - A due or retrying job can start up to the poll interval (≤ 2s) late.
+  - A busy worker runs recovery only between jobs.
+  - Low-priority jobs can starve under constant high-priority load.
+  - `POST /jobs` waits up to `REDIS_TIMEOUT_SECONDS` (0.5s) per request while Redis is down.
+  - The starlette TestClient `DeprecationWarning` is unchanged.
+- **Deviations:** none from the approved plan.
+- **Commit:** Phase 5 checkpoint `821b6ce`, committed on the human's instruction; rollback point `386668d`.
+- **Approval:** human approval for Phase 5 granted on 2026-10-22; status set to COMPLETED. Phase 6 not started.
 
 ## Phase 6 — Documentation, Regression and Submission
 

@@ -4,8 +4,9 @@ import logging
 import uuid
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
-from sqlalchemy.exc import SQLAlchemyError
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app import jobs, notifier
@@ -21,6 +22,18 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Job Queue Service")
 
 SessionDep = Annotated[Session, Depends(get_session)]
+
+
+@app.exception_handler(OperationalError)
+def database_unavailable(_request: Request, _exc: OperationalError) -> JSONResponse:
+    """PostgreSQL unreachable (or connection lost mid-transaction): nothing was committed.
+
+    503 tells clients to retry; with an idempotency key a retry can never create a duplicate.
+    """
+    logger.error("database unavailable", extra={"event": "db_unavailable"}, exc_info=True)
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content={"detail": "database unavailable"}
+    )
 
 
 @app.post(
