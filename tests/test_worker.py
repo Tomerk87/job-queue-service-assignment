@@ -10,7 +10,7 @@ import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
@@ -147,7 +147,8 @@ def test_empty_queue_returns_false() -> None:
 
 
 def test_ineligible_jobs_are_not_claimed(client: TestClient) -> None:
-    scheduled = submit(client, scheduled_at="2999-01-01T00:00:00Z")
+    in_an_hour = datetime.now(timezone.utc) + timedelta(hours=1)
+    scheduled = submit(client, scheduled_at=in_an_hour.isoformat())
     cancelled = submit(client)
     client.post(f"/jobs/{cancelled}/cancel")
     not_yet_due = submit(client)

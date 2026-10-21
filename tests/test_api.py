@@ -150,6 +150,24 @@ def test_scheduled_at_beyond_tolerance_is_rejected(client: TestClient) -> None:
     assert count_rows("jobs") == 0
 
 
+def test_scheduled_at_beyond_max_ahead_is_rejected(client: TestClient) -> None:
+    too_far = datetime.now(timezone.utc) + timedelta(days=2 * 365)
+
+    response = client.post("/jobs", json=EMAIL_JOB | {"scheduled_at": too_far.isoformat()})
+
+    assert response.status_code == 422
+    assert "in the future" in response.json()["detail"]
+    assert count_rows("jobs") == 0
+
+
+def test_listing_index_exists() -> None:
+    with engine.connect() as conn:
+        definition = conn.scalar(
+            text("SELECT indexdef FROM pg_indexes WHERE indexname = 'ix_jobs_created'")
+        )
+    assert definition is not None and "created_at DESC, id DESC" in definition
+
+
 # --- get / list ------------------------------------------------------------------------------
 
 

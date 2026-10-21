@@ -39,7 +39,7 @@ curl -s localhost:8000/health
 Payloads per type: `email {to, subject, body?}`, `webhook {url, body?}` (simulated, never called),
 `report {report_name}`, `batch {items: [...] (1..100)}`. `priority` is 0–10 (higher first).
 `scheduled_at` must be timezone-aware: a future value schedules the job, a value up to 30 seconds in the
-past runs it now, and anything older is rejected with 422. A repeated active `idempotency_key` returns the
+past runs it now, and anything older, or more than 365 days ahead, is rejected with 422. A repeated active `idempotency_key` returns the
 original job with HTTP 200, even if the new payload differs.
 
 ## Worker
@@ -63,6 +63,7 @@ progress updates.
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis for wake-up notifications |
 | `IDEMPOTENCY_TTL_HOURS` | `24` | Idempotency key retention (minimum 24) |
 | `SCHEDULE_PAST_TOLERANCE_SECONDS` | `30` | How far in the past `scheduled_at` may be |
+| `SCHEDULE_MAX_AHEAD_DAYS` | `365` | How far in the future `scheduled_at` may be |
 | `REDIS_TIMEOUT_SECONDS` | `0.5` | Socket timeout for best-effort Redis calls |
 | `WORKER_ID` | `<hostname>-<pid>` | Worker identity stored on claimed jobs |
 | `WORKER_POLL_INTERVAL_SECONDS` | `2` | Max idle wait before polling PostgreSQL (0 < x <= 2) |

@@ -23,8 +23,8 @@ CANCELLABLE_STATUSES = (JobStatus.PENDING, JobStatus.SCHEDULED)
 MAX_ERROR_LENGTH = 2000
 
 
-class ScheduleTooOldError(ValueError):
-    """scheduled_at lies further in the past than the configured tolerance."""
+class InvalidScheduleError(ValueError):
+    """scheduled_at is too far in the past (beyond the tolerance) or too far in the future."""
 
 
 class JobNotFoundError(LookupError):
@@ -59,17 +59,19 @@ class ClaimedJob:
 
 
 def resolve_schedule(
-    scheduled_at: datetime | None, db_now: datetime, tolerance: timedelta
+    scheduled_at: datetime | None, db_now: datetime, tolerance: timedelta, max_ahead: timedelta
 ) -> tuple[JobStatus, datetime]:
-    """Return the initial (status, next_run_at) for a new job."""
+    """Return the initial (status, next_run_at) for a new job. Both bounds are inclusive."""
     if scheduled_at is None:
         return JobStatus.PENDING, db_now
     scheduled_at = scheduled_at.astimezone(timezone.utc)
+    if scheduled_at > db_now + max_ahead:
+        raise InvalidScheduleError(f"scheduled_at is more than {max_ahead.days} days in the future")
     if scheduled_at > db_now:
         return JobStatus.SCHEDULED, scheduled_at
     if db_now - scheduled_at <= tolerance:
         return JobStatus.PENDING, db_now
-    raise ScheduleTooOldError(
+    raise InvalidScheduleError(
         f"scheduled_at is more than {int(tolerance.total_seconds())} seconds in the past"
     )
 
@@ -109,7 +111,7 @@ def _insert_job(session: Session, request: JobCreate, settings: Settings) -> Cre
     with session.begin():
         db_now: datetime = session.scalar(select(func.now()))
         status, next_run_at = resolve_schedule(
-            request.scheduled_at, db_now, settings.schedule_past_tolerance
+            request.scheduled_at, db_now, settings.schedule_past_tolerance, settings.schedule_max_ahead
         )
         job = Job(
             id=uuid.uuid4(),

@@ -187,7 +187,19 @@
   - *Tests:* the suite (same command) gives **115 passed, 0 failed, 0 skipped**; `test_worker.py` now has 24 tests. Coverage is 97% (512 statements, 14 missed; `worker.py` 88%, `jobs.py` 99%, `handlers.py` 100%). Repeating the 11 race, outage and wake-up tests 30 times (`-k "concurrent or race or redis_is_down or outage or drains or wakeup"`) gave 30 passed, 0 failed.
   - *Compose smoke rerun* (clean volume, same script): every scenario matched the first run. 100-item batch progress went 14 → 29 → 44 → 59 → 74 → 89 → 100. SIGTERM drained a batch from progress 7 to COMPLETED in 7s, with exit code 0.
   - *Reviewed and kept:* one progress write per batch item (each changes the percentage, at most 100 short transactions); handlers as plain functions; claim via `UPDATE ... WHERE id = (SELECT ... FOR UPDATE SKIP LOCKED)`, which uses `ix_jobs_pending_priority`.
-- **Revision commit:** the commit that adds this entry (`git log --grep '^Phase 2 revision:'`). The phase stays IN PROGRESS until the human approves.
+- **Revision commit:** `4bd8c97`.
+- **Phase 1 code improvements (2026-10-21, human-requested; applied on this branch because Phase 1 is already merged):** I reviewed the Phase 1 code (routes, schemas, notifier, db, the create/idempotency path, the migration) and found no correctness bugs in the core paths. The human chose two of the proposed improvements:
+  - *`scheduled_at` upper limit:* more than `SCHEDULE_MAX_AHEAD_DAYS` (default 365, inclusive) in the future → 422. `ScheduleTooOldError` was renamed `InvalidScheduleError`, since it now covers both bounds. TECHNICAL_SPEC §3, README, `.env.example` and Compose were updated. A worker test that used year 2999 now uses now + 1 hour.
+  - *Listing index:* new Alembic revision `0002` adds `ix_jobs_created (created_at DESC, id DESC)` to match `GET /jobs` ordering; 0001 is unchanged. TECHNICAL_SPEC §4 was updated. `EXPLAIN ... ORDER BY created_at DESC, id DESC LIMIT 50` shows `Index Scan using ix_jobs_created`. Sequential scans had to be disabled to show it, because the test table is tiny.
+  - *Not chosen:* 503 for DB outages, pinning the DB session timezone to UTC, a payload size limit.
+  - *Tests:* `docker compose --profile test run --rm --build tests pytest -q --cov=app --cov-report=term-missing` → **120 passed, 0 failed, 0 skipped**; 97% coverage (520 statements, 14 missed). New tests:
+    - Exactly 365 days ahead → SCHEDULED; 365 days + 1µs → rejected.
+    - Config rejects max-ahead 0.
+    - API: 2 years ahead → 422 with no row created.
+    - `ix_jobs_created` exists. `conftest` runs `downgrade base` → `upgrade head`, so 0002 is exercised both ways.
+  - *Migration on a database with data:* on a fresh Compose stack, migrate ran 0001 → 0002. With 3 jobs present, `docker compose run --rm migrate alembic downgrade 0001` ran "0002 -> 0001" and `alembic upgrade head` ran "0001 -> 0002". Afterwards `alembic_version` = 0002, 3 rows were intact and the index existed.
+  - *API checks:* 400 days ahead → 422 "scheduled_at is more than 365 days in the future"; 300 days ahead → 201 SCHEDULED; `GET /jobs` → 200.
+- **Phase 1 improvements commit:** the commit that adds this entry (`git log --grep '^Phase 1 improvements:'`). The phase stays IN PROGRESS until the human approves.
 
 ## Phase 3 — Retry, Priority and Scheduling
 **Status:** NOT STARTED | **Estimate:** 5–7 active hours

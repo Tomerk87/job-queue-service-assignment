@@ -31,7 +31,7 @@ SessionDep = Annotated[Session, Depends(get_session)]
 def submit_job(request: JobCreate, session: SessionDep, response: Response) -> Job:
     try:
         result = jobs.create_job(session, request, settings)
-    except jobs.ScheduleTooOldError as exc:
+    except jobs.InvalidScheduleError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     if result.created:
         notifier.notify_job_created(result.job.id)

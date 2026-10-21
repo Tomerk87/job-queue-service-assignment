@@ -20,7 +20,7 @@ Services: FastAPI API, Python worker, PostgreSQL, Redis. Docker Compose runs all
 
 ## 3. Job API contracts
 - `POST /jobs`: validate type-specific payload, priority integer 0–10 (default 0), max_attempts fixed to 3, optional future scheduled_at (UTC timestamp), optional idempotency_key <=255 chars. New job: HTTP 201 with job representation; duplicate active key: HTTP 200 with original job; invalid: 422. Job persistence commits before best-effort Redis notification.
-- `scheduled_at` rules (compared with DB now; timezone-aware input normalized to UTC): missing/null -> PENDING; future -> SCHEDULED; past or now within a configurable tolerance (default 30 seconds, inclusive) -> PENDING; more than the tolerance in the past -> 422; unparseable or timezone-naive -> 422.
+- `scheduled_at` rules (compared with DB now; timezone-aware input normalized to UTC): missing/null -> PENDING; future -> SCHEDULED; past or now within a configurable tolerance (default 30 seconds, inclusive) -> PENDING; more than the tolerance in the past -> 422; more than a configurable maximum in the future (default 365 days, inclusive) -> 422; unparseable or timezone-naive -> 422.
 - `GET /jobs/{id}`: job status, attempts, progress, result/error, timestamps; 404 when absent.
 - `GET /jobs?status=&type=&limit=&offset=`: filtered, paginated, newest first; validate bounds.
 - `POST /jobs/{id}/cancel`: atomically cancel PENDING/SCHEDULED; already CANCELLED returns 200; PROCESSING/COMPLETED/FAILED returns 409; missing returns 404. Cancellation racing a claim has one winner.
@@ -33,7 +33,7 @@ Suggested request payloads (final validation schemas may be narrow and documente
 ### jobs
 id UUID PK; type; payload JSONB; status (SCHEDULED/PENDING/PROCESSING/COMPLETED/FAILED/CANCELLED); priority int; attempts int; max_attempts int default 3; scheduled_at nullable timestamptz; next_run_at timestamptz; lease_expires_at nullable timestamptz; claim_token UUID nullable; worker_id nullable; idempotency_key nullable; progress int 0..100; result JSONB nullable; last_error nullable; created_at, updated_at, started_at nullable, completed_at nullable timestamptz.
 
-Indexes: eligibility `(priority DESC, created_at ASC)` filtered on PENDING plus next_run_at as appropriate; expired leases filtered on PROCESSING; filtering by status/type. Use UTC-aware datetimes and DB time for lease comparisons.
+Indexes: eligibility `(priority DESC, created_at ASC)` filtered on PENDING plus next_run_at as appropriate; expired leases filtered on PROCESSING; filtering by status/type; newest-first listing `(created_at DESC, id DESC)`. Use UTC-aware datetimes and DB time for lease comparisons.
 
 ### idempotency_keys
 `key` unique PK; `job_id` FK; `expires_at` timestamptz. Job rows persist beyond key expiry. The API atomically reserves a key and creates its job in one DB transaction; on conflict, read the still-active mapping and return the existing job. Expired-key replacement must serialize competing requests (e.g. row locking/atomic upsert with a carefully tested conflict path). No two concurrent submissions with the same active key may create distinct jobs. Retain keys for **at least** 24 hours. Cleanup must not remove unexpired keys. Policy: same active key returns the original job even if the new payload differs; document this explicitly.
