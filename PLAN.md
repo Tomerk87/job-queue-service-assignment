@@ -1,17 +1,17 @@
-# Job Queue Service — Implementation Plan v1.1 (Six Iterations)
+# Job Queue Service — Implementation Plan v1.1 (Six Phases)
 
-**Status:** PLANNING — implementation has not started. **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt; estimates are active engineering hours. **Coding agent:** Claude Code. **Current iteration:** none.
+**Status:** PLANNING — implementation has not started. **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt; estimates are active engineering hours. **Coding agent:** Claude Code. **Current phase:** none.
 
 ## Rules for tracking and verification
-- Each iteration has `NOT STARTED | IN PROGRESS | BLOCKED | COMPLETED`, implementation checklist, tests/edge cases, quality review, and Definition of Done (DoD).
+- Each phase has `NOT STARTED | IN PROGRESS | BLOCKED | COMPLETED`, implementation checklist, tests/edge cases, quality review, and Definition of Done (DoD).
 - Claude Code updates `[ ]` to `[x]` **only after the item is actually implemented and verified**. For tests, verification means **executed and passed**, not merely authored. If a test fails or is skipped, leave unchecked and record why.
-- Under each iteration's **Execution Evidence**, record the exact commands, results (passed/failed/skipped), coverage numbers if measured, known defects, and commit hash. Do not invent evidence.
-- Run tests in the same iteration as the feature; iteration 5 performs system-wide integration and edge-case hardening; iteration 6 reruns everything in a clean environment.
-- Every iteration must pass a **Code Quality Gate**: clear responsibilities, no unnecessary dependencies/abstractions, short DB transactions, efficient bounded polling and indexed queries, deterministic tests, explainable code, no sensitive logs.
-- Final coverage goals: >=85% measured application line coverage and aim >=90% in critical modules. **Not a per-iteration percentage requirement**. Coverage never replaces meaningful concurrency tests. See the technical spec for measurement and exclusions.
-- Stop after the current iteration and request human approval before continuing. Never silently change architecture or API contracts.
+- Under each phase's **Execution Evidence**, record the exact commands, results (passed/failed/skipped), coverage numbers if measured, known defects, and commit hash. Do not invent evidence.
+- Run tests in the same phase as the feature; phase 5 performs system-wide integration and edge-case hardening; phase 6 reruns everything in a clean environment.
+- Every phase must pass a **Code Quality Gate**: clear responsibilities, no unnecessary dependencies/abstractions, short DB transactions, efficient bounded polling and indexed queries, deterministic tests, explainable code, no sensitive logs.
+- Final coverage goals: >=85% measured application line coverage and aim >=90% in critical modules. **Not a per-phase percentage requirement**. Coverage never replaces meaningful concurrency tests. See the technical spec for measurement and exclusions.
+- Stop after the current phase and request human approval before continuing. Never silently change architecture or API contracts.
 
-## Iteration 1 — Foundation and API
+## Phase 1 — Foundation and API
 **Status:** NOT STARTED | **Estimate:** 5–7 active hours
 
 ### Implementation
@@ -21,7 +21,7 @@
 - [ ] Implement `POST /jobs`, `GET /jobs/{id}`, `GET /jobs`, `POST /jobs/{id}/cancel`, `GET /health` with validation and appropriate status codes.
 - [ ] Implement atomic active-key idempotency reservation and 24h expiry/reuse policy with old jobs retained.
 - [ ] Commit job before best-effort Redis notification; API correctness does not depend on Redis.
-- [ ] Keep `POST /jobs/{id}/retry` contract reserved; if endpoint stubbed, return explicit not-implemented behavior until Iteration 3 (never pretend it works).
+- [ ] Keep `POST /jobs/{id}/retry` contract reserved; if endpoint stubbed, return explicit not-implemented behavior until Phase 3 (never pretend it works).
 
 ### Tests & verification
 - [ ] API create/get/list and validation/404/409 cases pass (EC-01, EC-02).
@@ -34,13 +34,13 @@
 - [ ] Transactions and idempotency conflict paths are understandable, atomic and covered by tests.
 
 ### Definition of Done
-- [ ] All Iteration 1 tests and smoke checks pass with recorded commands/results.
+- [ ] All Phase 1 tests and smoke checks pass with recorded commands/results.
 - [ ] No critical open defect; update evidence and Git checkpoint.
-- [ ] Human approves moving to Iteration 2.
+- [ ] Human approves moving to Phase 2.
 
 **Execution Evidence:** _Not run. Commands/results/coverage/commit: pending._
 
-## Iteration 2 — Worker and Mock Execution
+## Phase 2 — Worker and Mock Execution
 **Status:** NOT STARTED | **Estimate:** 5–7 active hours
 
 ### Implementation
@@ -64,11 +64,11 @@
 ### Definition of Done
 - [ ] Worker happy path and concurrent claim integration pass with evidence.
 - [ ] No critical open defect; update evidence and Git checkpoint.
-- [ ] Human approves moving to Iteration 3.
+- [ ] Human approves moving to Phase 3.
 
 **Execution Evidence:** _Not run. Commands/results/coverage/commit: pending._
 
-## Iteration 3 — Retry, Priority and Scheduling
+## Phase 3 — Retry, Priority and Scheduling
 **Status:** NOT STARTED | **Estimate:** 5–7 active hours
 
 ### Implementation
@@ -92,11 +92,11 @@
 ### Definition of Done
 - [ ] All new transition and retry tests pass with evidence.
 - [ ] No critical open defect; update evidence and Git checkpoint.
-- [ ] Human approves moving to Iteration 4.
+- [ ] Human approves moving to Phase 4.
 
 **Execution Evidence:** _Not run. Commands/results/coverage/commit: pending._
 
-## Iteration 4 — Crash Recovery and Reliability
+## Phase 4 — Crash Recovery and Reliability
 **Status:** NOT STARTED | **Estimate:** 6–8 active hours
 
 ### Implementation
@@ -120,11 +120,11 @@
 ### Definition of Done
 - [ ] Real-Postgres recovery and fencing tests pass with evidence.
 - [ ] No critical open defect; update evidence and Git checkpoint.
-- [ ] Human approves moving to Iteration 5.
+- [ ] Human approves moving to Phase 5.
 
 **Execution Evidence:** _Not run. Commands/results/coverage/commit: pending._
 
-## Iteration 5 — Full Integration, Edge Cases and Hardening
+## Phase 5 — Full Integration, Edge Cases and Hardening
 **Status:** NOT STARTED | **Estimate:** 5–7 active hours
 
 ### Implementation
@@ -149,11 +149,11 @@
 ### Definition of Done
 - [ ] Full integration suite green; no unresolved critical consistency defect.
 - [ ] Evidence includes test counts, coverage, failures fixed and Git checkpoint.
-- [ ] Human approves moving to Iteration 6.
+- [ ] Human approves moving to Phase 6.
 
 **Execution Evidence:** _Not run. Commands/results/coverage/commit: pending._
 
-## Iteration 6 — Documentation, Regression and Submission
+## Phase 6 — Documentation, Regression and Submission
 **Status:** NOT STARTED | **Estimate:** 4–6 active hours
 
 ### Implementation
@@ -187,8 +187,8 @@ See `TECHNICAL_SPEC.md` section 14 for the full EC-01..EC-20 matrix and expected
 ## Time-budget priority
 **P0:** Compose, API, persistence, separate worker, four mock handlers, atomic claim, retry, priority, cancellation, idempotency, >=6 meaningful tests, required docs. **P1:** scheduled jobs, crash recovery, structured logs, graceful shutdown, health. **P2:** optional polish. Do not cut already-integrated correctness protections. Test coverage goals do not justify omitting P0 requirements.
 
-## Per-iteration report format (required)
-- Iteration and status:
+## Per-phase report format (required)
+- Phase and status:
 - Files changed and why:
 - Implemented checklist items:
 - Test commands actually executed:
@@ -198,4 +198,4 @@ See `TECHNICAL_SPEC.md` section 14 for the full EC-01..EC-20 matrix and expected
 - Simplicity/efficiency review findings:
 - Open defects, deviations, risk and follow-up:
 - Commit hash / rollback point:
-- Human approval for next iteration: pending / granted:
+- Human approval for next phase: pending / granted:
