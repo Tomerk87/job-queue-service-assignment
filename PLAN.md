@@ -1,6 +1,6 @@
 # Job Queue Service — Implementation Plan v1.1 (Six Phases)
 
-**Status:** IMPLEMENTATION — Phases 1–2 completed; Phase 3 in progress. **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt. **Coding agent:** Claude Code. **Current phase:** 3.
+**Status:** IMPLEMENTATION — Phases 1–3 completed; Phase 4 not started (awaiting execution instruction). **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt. **Coding agent:** Claude Code. **Current phase:** 3.
 
 ## Rules for tracking and verification
 - Each phase has `NOT STARTED | IN PROGRESS | BLOCKED | COMPLETED`, implementation checklist, tests/edge cases, quality review, and Definition of Done (DoD).
@@ -70,7 +70,7 @@
 **Execution Evidence:** see [EVIDENCE.md](EVIDENCE.md#phase-2--worker-and-mock-execution).
 
 ## Phase 3 — Retry, Priority and Scheduling
-**Status:** IN PROGRESS
+**Status:** COMPLETED
 
 ### Implementation
 - [x] Release due SCHEDULED jobs atomically; no early execution.
@@ -93,7 +93,7 @@
 ### Definition of Done
 - [x] All new transition and retry tests pass with evidence.
 - [x] No critical open defect; update evidence and Git checkpoint.
-- [ ] Human approves moving to Phase 4.
+- [x] Human approves moving to Phase 4.
 
 **Execution Evidence:** see [EVIDENCE.md](EVIDENCE.md#phase-3--retry-priority-and-scheduling).
 

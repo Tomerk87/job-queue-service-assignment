@@ -208,7 +208,8 @@ _Recorded 2026-10-21._
   - Lease expiry and crash recovery remain Phase 4.
   - The starlette TestClient `DeprecationWarning` is unchanged.
 - **Deviations:** none from the approved plan. The retry-endpoint test placeholder from Phase 1 was replaced as planned.
-- **Commit:** the Phase 3 checkpoint is the commit that adds this entry (`git log --grep '^Phase 3:'`); rollback point `a6283cb`. The phase stays IN PROGRESS until the human approves.
+- **Commit:** Phase 3 checkpoint `e7b4f4b`; rollback point `a6283cb`.
+- **Approval:** human approval for Phase 3 granted on 2026-10-21; status set to COMPLETED. Phase 4 not started.
 
 ## Phase 4 — Crash Recovery and Reliability
 
