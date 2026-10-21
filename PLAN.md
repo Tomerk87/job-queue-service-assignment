@@ -178,7 +178,16 @@
   - The batch limit changed from 1000 to 100: the TECHNICAL_SPEC §3 payload note and README were updated.
   - Priority ordering was written early; it is still verified in Phase 3.
   - Worker Compose `stop_grace_period: 30s` was added ahead of Phase 4's shutdown work.
-- **Commit:** the Phase 2 checkpoint is the commit that adds this evidence on `phase_2_implementation` (`git log --grep '^Phase 2:'`); rollback point `1b48a44`. The phase stays IN PROGRESS until the human approves.
+- **Commit:** the first Phase 2 checkpoint is `0f80d7e` on `phase_2_implementation`; rollback point `1b48a44`.
+- **Revision pass (2026-10-21, human-requested: improvements, simplicity, efficiency):**
+  - *Simpler DB access:* `run_once` now uses one `Session` per job on the worker thread instead of a new session per write (claim, up to 100 progress writes, then complete or fail). Each write is still its own short `begin()` transaction, so no transaction or connection is held while a handler runs. The `_log_lost_ownership` helper and the duplicate lost-ownership paths collapsed into `_execute`, which returns False on lost ownership.
+  - *Efficiency fix:* `Wakeup` drained only one hint per wake-up. After a burst of N submissions, the idle worker woke N times on stale hints and ran N empty claim queries. It now drains all buffered hints after the first one. A mutation check confirmed the new test fails without the drain loop.
+  - *Correctness fix:* a database error inside a handler (e.g. a batch progress write) was caught by `except Exception` and recorded as a terminal FAILED. It now propagates to the worker loop, which logs it and backs off, and the job is left for Phase 4 lease recovery.
+  - *Robustness:* `restart: unless-stopped` on `api` and `worker` (confirmed with `docker inspect`; `migrate` stays `no`), so an unexpected crash doesn't leave the worker down. A manual `docker compose stop` is still respected.
+  - *Tests:* the suite (same command) gives **115 passed, 0 failed, 0 skipped**; `test_worker.py` now has 24 tests. Coverage is 97% (512 statements, 14 missed; `worker.py` 88%, `jobs.py` 99%, `handlers.py` 100%). Repeating the 11 race, outage and wake-up tests 30 times (`-k "concurrent or race or redis_is_down or outage or drains or wakeup"`) gave 30 passed, 0 failed.
+  - *Compose smoke rerun* (clean volume, same script): every scenario matched the first run. 100-item batch progress went 14 → 29 → 44 → 59 → 74 → 89 → 100. SIGTERM drained a batch from progress 7 to COMPLETED in 7s, with exit code 0.
+  - *Reviewed and kept:* one progress write per batch item (each changes the percentage, at most 100 short transactions); handlers as plain functions; claim via `UPDATE ... WHERE id = (SELECT ... FOR UPDATE SKIP LOCKED)`, which uses `ix_jobs_pending_priority`.
+- **Revision commit:** the commit that adds this entry (`git log --grep '^Phase 2 revision:'`). The phase stays IN PROGRESS until the human approves.
 
 ## Phase 3 — Retry, Priority and Scheduling
 **Status:** NOT STARTED | **Estimate:** 5–7 active hours

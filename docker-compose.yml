@@ -51,6 +51,7 @@ services:
   api:
     build: *app-build
     image: job-queue-service:local
+    restart: unless-stopped
     environment: *app-env
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
@@ -67,6 +68,7 @@ services:
   worker:
     build: *app-build
     image: job-queue-service:local
+    restart: unless-stopped
     environment: *app-env
     command: ["python", "-m", "app.worker"]
     # Longer than the longest mock job (batch: 100 items x 0.2s = 20s) so SIGTERM can drain it.

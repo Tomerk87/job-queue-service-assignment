@@ -17,6 +17,7 @@ import pytest
 import redis
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
 from app import jobs, notifier
@@ -301,6 +302,24 @@ def test_batch_stops_writing_progress_after_losing_ownership(client: TestClient)
     assert calls == 2  # the handler stopped instead of processing the third item
 
 
+def test_database_error_during_progress_is_not_recorded_as_job_failure(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An infrastructure error propagates to the worker loop; the job is left for lease recovery."""
+    job_id = submit(client, "batch")
+
+    def database_down(*_args: Any) -> bool:
+        raise OperationalError("UPDATE jobs ...", {}, Exception("connection lost"))
+
+    monkeypatch.setattr(jobs, "update_progress", database_down)
+    with pytest.raises(OperationalError):
+        work_once()
+
+    row = db_row(job_id)
+    assert (row.status, row.last_error) == ("PROCESSING", None)
+    assert log_events(job_id) == ["created", "claimed"]
+
+
 # --- batch progress persisted (EC-16) -----------------------------------------------------------
 
 
@@ -356,6 +375,23 @@ def test_wakeup_returns_early_on_notification() -> None:
         started = time.monotonic()
         wakeup.wait(5)
         assert time.monotonic() - started < 1
+    finally:
+        wakeup.close()
+
+
+def test_wakeup_drains_stale_hints_so_a_burst_wakes_only_once() -> None:
+    stop = threading.Event()
+    wakeup = Wakeup(settings.redis_url, settings.redis_timeout_seconds, stop)
+    try:
+        wakeup.wait(0.05)  # subscribes
+        for _ in range(5):
+            notifier.notify_job_created(uuid.uuid4())
+        time.sleep(0.2)  # let all five hints arrive in the subscriber's buffer
+        wakeup.wait(5)  # returns at once on the first hint and drains the rest
+
+        started = time.monotonic()
+        wakeup.wait(0.3)
+        assert time.monotonic() - started >= 0.25  # no stale hint left to wake on
     finally:
         wakeup.close()
 
