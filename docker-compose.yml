@@ -1,0 +1,90 @@
+x-app-build: &app-build
+  context: .
+  target: runtime
+
+x-app-env: &app-env
+  DATABASE_URL: postgresql+psycopg://jobqueue:jobqueue@postgres:5432/jobqueue
+  REDIS_URL: redis://redis:6379/0
+  IDEMPOTENCY_TTL_HOURS: "24"
+  SCHEDULE_PAST_TOLERANCE_SECONDS: "30"
+  REDIS_TIMEOUT_SECONDS: "0.5"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: jobqueue
+      POSTGRES_PASSWORD: jobqueue
+      POSTGRES_DB: jobqueue
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobqueue -d jobqueue"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Runs migrations once; api and worker start only after it succeeds, so
+  # scaled worker replicas never race to migrate.
+  migrate:
+    build: *app-build
+    image: job-queue-service:local
+    environment: *app-env
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: *app-build
+    image: job-queue-service:local
+    environment: *app-env
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  worker:
+    build: *app-build
+    image: job-queue-service:local
+    environment: *app-env
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  # docker compose --profile test run --rm tests
+  tests:
+    profiles: ["test"]
+    build:
+      context: .
+      target: test
+    image: job-queue-service:test
+    environment:
+      <<: *app-env
+      DATABASE_URL: postgresql+psycopg://jobqueue:jobqueue@postgres:5432/jobqueue_test
+    command: ["pytest", "-v"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:

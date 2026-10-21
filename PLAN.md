@@ -1,6 +1,6 @@
 # Job Queue Service — Implementation Plan v1.1 (Six Phases)
 
-**Status:** PLANNING — implementation has not started. **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt; estimates are active engineering hours. **Coding agent:** Claude Code. **Current phase:** none.
+**Status:** IMPLEMENTATION — Phase 1 in progress. **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt; estimates are active engineering hours. **Coding agent:** Claude Code. **Current phase:** 1.
 
 ## Rules for tracking and verification
 - Each phase has `NOT STARTED | IN PROGRESS | BLOCKED | COMPLETED`, implementation checklist, tests/edge cases, quality review, and Definition of Done (DoD).
@@ -12,33 +12,89 @@
 - Stop after the current phase and request human approval before continuing. Never silently change architecture or API contracts.
 
 ## Phase 1 — Foundation and API
-**Status:** NOT STARTED | **Estimate:** 5–7 active hours
+**Status:** IN PROGRESS | **Estimate:** 5–7 active hours
 
 ### Implementation
-- [ ] Establish Python 3.11+ project, minimal dependencies, typed configuration and directory structure.
-- [ ] Create Dockerfile and Compose services: API, idle worker entrypoint, PostgreSQL, Redis; document environment variables.
-- [ ] Define SQLAlchemy models and Alembic migrations for jobs, idempotency_keys and job_logs; add constraints/indexes.
-- [ ] Implement `POST /jobs`, `GET /jobs/{id}`, `GET /jobs`, `POST /jobs/{id}/cancel`, `GET /health` with validation and appropriate status codes.
-- [ ] Implement atomic active-key idempotency reservation and 24h expiry/reuse policy with old jobs retained.
-- [ ] Commit job before best-effort Redis notification; API correctness does not depend on Redis.
-- [ ] Keep `POST /jobs/{id}/retry` contract reserved; if endpoint stubbed, return explicit not-implemented behavior until Phase 3 (never pretend it works).
+- [x] Establish Python 3.11+ project, minimal dependencies, typed configuration and directory structure.
+- [x] Create Dockerfile and Compose services: API, idle worker entrypoint, PostgreSQL, Redis; document environment variables.
+- [x] Define SQLAlchemy models and Alembic migrations for jobs, idempotency_keys and job_logs; add constraints/indexes.
+- [x] Implement `POST /jobs`, `GET /jobs/{id}`, `GET /jobs`, `POST /jobs/{id}/cancel`, `GET /health` with validation and appropriate status codes.
+- [x] Implement atomic active-key idempotency reservation and 24h expiry/reuse policy with old jobs retained.
+- [x] Commit job before best-effort Redis notification; API correctness does not depend on Redis.
+- [x] Keep `POST /jobs/{id}/retry` contract reserved; if endpoint stubbed, return explicit not-implemented behavior until Phase 3 (never pretend it works).
 
 ### Tests & verification
-- [ ] API create/get/list and validation/404/409 cases pass (EC-01, EC-02).
-- [ ] Concurrent same-key submissions create one job using real PostgreSQL (EC-03).
-- [ ] Expired-key reuse retains original job and handles races (EC-04).
-- [ ] Clean Compose build, health, migration and API smoke run successfully.
+- [x] API create/get/list and validation/404/409 cases pass (EC-01, EC-02).
+- [x] `scheduled_at` boundary tests pass: future, now, exactly 30s past (accepted), beyond 30s and far past (422), naive (422), UTC normalization (EC-01).
+- [x] Concurrent same-key submissions create one job using real PostgreSQL (EC-03).
+- [x] Expired-key reuse retains original job and handles races (EC-04).
+- [x] Clean Compose build, health, migration and API smoke run successfully.
 
 ### Code Quality Gate
-- [ ] API, validation, persistence and config responsibilities are clear; no speculative abstraction or redundant dependency.
-- [ ] Transactions and idempotency conflict paths are understandable, atomic and covered by tests.
+- [x] API, validation, persistence and config responsibilities are clear; no speculative abstraction or redundant dependency.
+- [x] Transactions and idempotency conflict paths are understandable, atomic and covered by tests.
 
 ### Definition of Done
-- [ ] All Phase 1 tests and smoke checks pass with recorded commands/results.
-- [ ] No critical open defect; update evidence and Git checkpoint.
+- [x] All Phase 1 tests and smoke checks pass with recorded commands/results.
+- [x] No critical open defect; update evidence and Git checkpoint.
 - [ ] Human approves moving to Phase 2.
 
-**Execution Evidence:** _Not run. Commands/results/coverage/commit: pending._
+**Execution Evidence (2026-10-21):**
+- **Environment:** macOS host, Docker 29.8.2 / Compose v5.6.0. Containers run Python 3.12.15, postgres:16-alpine and redis:7-alpine. Local Python is 3.9, so all Python runs in containers.
+- **Decisions approved by the human before execution:**
+  - `scheduled_at`: past values within a 30s tolerance (configurable, inclusive) become PENDING. Older, naive or invalid values return 422. Values are normalized to UTC. TECHNICAL_SPEC §3, §5 and EC-01 were updated.
+  - Tests run inside Docker against the Compose Postgres (`jobqueue_test`).
+  - The retry endpoint is omitted until Phase 3.
+  - Migrations run in a one-shot `migrate` service.
+  - Sync SQLAlchemy 2.0 with psycopg 3.
+  - Dependencies: `pyproject.toml` plus pinned `requirements*.txt`.
+  - Health returns 200 ok/degraded and 503 unhealthy.
+  - List `limit` is 1..100 (default 50).
+- **Build:** `docker compose build` and `docker compose --profile test build tests` both succeeded.
+- **Test suite:** `docker compose --profile test run --rm --build tests pytest -v --cov=app --cov-report=term-missing` → **68 passed, 0 failed, 0 skipped** (1.24s, fresh database volume).
+  - `tests/test_schedule.py`: 10 unit tests. They cover `scheduled_at` boundaries (none, future, now, exactly 30s past, 30s+1µs, far past, zero tolerance, +03:00 → UTC) and config bounds.
+  - `tests/test_api.py`: 51 tests.
+    - EC-01: all 4 types created and fetched; 18 invalid bodies return 422 and create no rows; scheduled/recent-past/too-old via the API.
+    - EC-02: 404 for get and cancel. Cancel PENDING/SCHEDULED → 200, repeat → 200, PROCESSING/COMPLETED/FAILED → 409.
+    - Also: list order, pagination, filters and bounds; health ok/degraded/unhealthy; submit succeeds with Redis down; Redis wake-up published after commit; retry route absent.
+  - `tests/test_idempotency.py`: 7 tests on real PostgreSQL.
+    - Same key returns the original (also with a different payload).
+    - Key retained ≥24h.
+    - **EC-03:** 10 threads behind a barrier with the same key → exactly 1 job, 1 log row, 1 created and 9 returned the same id.
+    - **EC-04:** an expired key maps to a new job and the old job is retained. In the 10-thread race on an expired key, exactly one new job is created.
+- **Flakiness check:** 30 repeated runs of the two concurrent tests (`pytest -q -k concurrent tests/test_idempotency.py` in a loop) → 30 passed, 0 failed.
+- **Coverage (informational; no per-phase gate):** 94% total line coverage, 338 statements, 19 missed.
+  - `jobs.py` 99%. The only uncovered line is the bounded-retry `RuntimeError`, reachable only if a key's TTL were shorter than one request.
+  - `config.py`, `db.py`, `main.py`, `models.py`, `notifier.py` and `schemas.py`: 100%.
+  - `worker.py` 0%: the idle entrypoint is covered by the smoke test below, not by pytest. Nothing is excluded from measurement yet.
+- **Smoke (`docker compose down -v && docker compose up -d --build --wait`, then curl):**
+  - `migrate` exited 0 and ran revision 0001. api was healthy and the worker started idle.
+  - `/health` → 200 ok.
+  - POST with key → 201; same key → 200 with the same id; scheduled +1h → 201 SCHEDULED; invalid → 422.
+  - GET → 200; list by type → 200.
+  - Cancel → 200, cancel again → 200; unknown id → 404; retry → 404.
+  - After `stop redis`: `/health` → 200 degraded, POST → 201, and a warning was logged with the job_id.
+  - After `stop postgres`: `/health` → 503 unhealthy, POST → 500 (no false success).
+  - `stop worker` → SIGTERM was logged and the worker exited with code 0.
+- **Defects found and fixed during the phase:**
+  1. POST echoed `scheduled_at` with the client's offset while the database returned UTC. Fixed by normalizing to UTC in the schema validator; caught by `test_offset_scheduled_at_is_stored_as_same_instant`.
+  2. `migrate` failed with `ModuleNotFoundError: app` because the alembic CLI does not add the cwd to `sys.path`; tests had masked this through pytest's `pythonpath`. Fixed with `prepend_sys_path = .` in `alembic.ini` and caught by the Compose smoke run.
+- **Simplicity/efficiency review:**
+  - Runtime dependencies: fastapi, uvicorn, SQLAlchemy, psycopg, alembic, redis. There is no settings or validation library beyond pydantic (bundled with FastAPI).
+  - One module per responsibility: config, db, models, schemas, jobs (persistence/transitions), notifier, main (routes), worker.
+  - Every write runs in one short `session.begin()` transaction. Idempotency is a single `INSERT ... ON CONFLICT DO UPDATE ... WHERE expires_at <= now()`; on conflict the losing transaction rolls back and reads the active mapping (bounded to 2 passes).
+  - Cancel is one conditional UPDATE with RETURNING.
+  - The Redis call comes after commit, with 0.5s timeouts, and failures are logged rather than silently swallowed.
+  - DB time `now()` drives scheduling and key expiry. `claim_token` is never serialized.
+  - Indexes: partial eligibility, lease and scheduled indexes, plus (status, created_at) and (type, created_at) for list filters.
+- **Known limitations (not defects):**
+  - Unfiltered listing and health counts scan `jobs` (bounded by `limit`, acceptable at this scale).
+  - The losing duplicate submission inserts and then rolls back a job row (cheap, and keeps one code path).
+  - Starlette's TestClient emits a third-party `DeprecationWarning`.
+- **Deviations:**
+  - The plan's test list gained one line for the `scheduled_at` boundary tests, at the human's request.
+  - The retry route is absent rather than stubbed, as the plan allows.
+- **Commit:** see Git checkpoint below.
 
 ## Phase 2 — Worker and Mock Execution
 **Status:** NOT STARTED | **Estimate:** 5–7 active hours

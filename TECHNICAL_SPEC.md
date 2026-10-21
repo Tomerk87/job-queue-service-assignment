@@ -20,6 +20,7 @@ Services: FastAPI API, Python worker, PostgreSQL, Redis. Docker Compose runs all
 
 ## 3. Job API contracts
 - `POST /jobs`: validate type-specific payload, priority integer 0–10 (default 0), max_attempts fixed to 3, optional future scheduled_at (UTC timestamp), optional idempotency_key <=255 chars. New job: HTTP 201 with job representation; duplicate active key: HTTP 200 with original job; invalid: 422. Job persistence commits before best-effort Redis notification.
+- `scheduled_at` rules (compared with DB now; timezone-aware input normalized to UTC): missing/null -> PENDING; future -> SCHEDULED; past or now within a configurable tolerance (default 30 seconds, inclusive) -> PENDING; more than the tolerance in the past -> 422; unparseable or timezone-naive -> 422.
 - `GET /jobs/{id}`: job status, attempts, progress, result/error, timestamps; 404 when absent.
 - `GET /jobs?status=&type=&limit=&offset=`: filtered, paginated, newest first; validate bounds.
 - `POST /jobs/{id}/cancel`: atomically cancel PENDING/SCHEDULED; already CANCELLED returns 200; PROCESSING/COMPLETED/FAILED returns 409; missing returns 404. Cancellation racing a claim has one winner.
@@ -41,7 +42,7 @@ Indexes: eligibility `(priority DESC, created_at ASC)` filtered on PENDING plus 
 id PK, job_id FK, level, event, message, metadata JSONB, created_at. Record claim, retry, recovery, manual retry, completion and terminal failure; avoid sensitive payload logging.
 
 ## 5. State machine
-- On creation: future scheduled_at -> SCHEDULED; otherwise PENDING.
+- On creation: future scheduled_at -> SCHEDULED; missing, or past/now within the tolerance window (section 3) -> PENDING; older than the tolerance -> rejected with 422.
 - Scheduler: SCHEDULED -> PENDING only when scheduled_at <= DB now, via atomic conditional update.
 - Claim: eligible PENDING (`next_run_at <= DB now`) -> PROCESSING; increment attempts; assign fresh claim_token, worker_id, started_at, lease_expires_at.
 - Successful execution: PROCESSING -> COMPLETED only with matching token; persist result, progress=100, completed_at, clear lease/token.
@@ -129,7 +130,7 @@ Testing is incremental: write/run relevant tests in the same iteration as each f
 ### Edge-case matrix (test IDs are stable across plan and test names)
 | ID | Area | Required scenario | Earliest iteration | Test type |
 |---|---|---|---|---|
-| EC-01 | API | invalid/missing type-specific payload; invalid priority/date/limit | 1 | API |
+| EC-01 | API | invalid/missing type-specific payload; invalid priority/date/limit; scheduled_at boundaries (exactly 30s past accepted, beyond 30s/far past/naive rejected) | 1 | Unit + API |
 | EC-02 | API | missing job ID -> 404; invalid state action -> 409 | 1/3 | API |
 | EC-03 | Idempotency | two simultaneous submissions, same active key -> one job | 1 | PostgreSQL integration |
 | EC-04 | Idempotency | expired key reused atomically; old job retained | 1/5 | PostgreSQL integration |
