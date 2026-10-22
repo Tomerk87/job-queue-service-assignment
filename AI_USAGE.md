@@ -2,7 +2,7 @@
 
 ## Tools I Used
 
-**ChatGPT** — Used during the planning and design stages to analyze requirements, evaluate architectural alternatives, explore edge cases, and define acceptance criteria. After architecture desicion, I structured the implementation into six phases, each with clearly defined tasks, tests, and completion criteria.
+**ChatGPT** — Used during the planning and design stages to analyze requirements, evaluate architectural alternatives, explore edge cases, and define acceptance criteria. After architecture decision, I structured the implementation into six phases, each with clearly defined tasks, tests, and completion criteria.
 
 **Claude Code** — Used for the implementation through a vibe-coding workflow, including writing code, developing and executing tests, verifying edge cases, and documenting results. Development was performed incrementally, with each phase I reviewed and approved before proceeding to the next.
 
@@ -10,7 +10,7 @@
 
 **1. Architectural analysis and trade-offs**
 
-Drawing on my previous experience with Redis, I explored different approaches to implementing the job queue, wether using classic queue solutions such as Kafka, RabbitMq etc. Discussions with ChatGPT helped evaluate PostgreSQL, Redis, and dedicated queue technologies in terms of implementation time, complexity, reliability, and failure recovery.
+Drawing on my previous experience with Redis, I explored different approaches to implementing the job queue, whether using classic queue solutions such as Kafka, RabbitMQ etc. Discussions with ChatGPT helped evaluate PostgreSQL, Redis, and dedicated queue technologies in terms of implementation time, complexity, reliability, and failure recovery.
 
 I ultimately chose PostgreSQL as the source of truth for job state and claiming, with Redis used for worker notifications. This provided a relatively simple architecture while maintaining clear consistency guarantees.
 

@@ -1,6 +1,6 @@
 # Job Queue Service — Technical Specification v1.1
 
-Status: **Approved design baseline, revised for testing and quality; implementation not started**. This document describes planned behavior, not implemented functionality.
+Status: **Implemented.** All six phases are complete and verified. This design baseline, revised for testing and quality, is what the code implements; see `README.md` for usage and `EVIDENCE.md` for the verification record.
 
 ## 1. Objective and source
 Build a Python 3.11+ distributed background job processing service for a backend engineering take-home assessment. The assignment explicitly requires an API, a queue/cache technology, separate worker processes, relational persistence, three-attempt exponential retry, priority, cancellation, Docker Compose, and at least six meaningful tests. Scheduled jobs, crash recovery, structured logs, graceful shutdown and health statistics are also targeted. The four job types are simulated email, webhook, report, and batch.

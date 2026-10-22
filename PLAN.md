@@ -1,6 +1,6 @@
 # Job Queue Service — Implementation Plan v1.1 (Six Phases)
 
-**Status:** IMPLEMENTATION — Phases 1–5 completed; Phase 6 in progress. **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt. **Coding agent:** Claude Code. **Current phase:** 6.
+**Status:** COMPLETED — all six phases completed; submitted as tag `v1.0` on `main`. **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt. **Coding agent:** Claude Code. **Current phase:** 6.
 
 ## Rules for tracking and verification
 - Each phase has `NOT STARTED | IN PROGRESS | BLOCKED | COMPLETED`, implementation checklist, tests/edge cases, quality review, and Definition of Done (DoD).
@@ -155,7 +155,7 @@
 **Execution Evidence:** see [EVIDENCE.md](EVIDENCE.md#phase-5--full-integration-edge-cases-and-hardening).
 
 ## Phase 6 — Documentation, Regression and Submission
-**Status:** IN PROGRESS
+**Status:** COMPLETED
 
 ### Implementation
 - [x] Write accurate README.md: architecture, setup, migrations, API examples, tests and demo scenarios.
