@@ -165,18 +165,18 @@
 - [x] Perform final code simplicity/efficiency/readability review and remove obsolete scaffolding.
 
 ### Tests & verification
-- [ ] From a fresh checkout/environment, `docker compose up --build` and migrations work (EC-20).
+- [x] From a fresh checkout/environment, `docker compose up --build` and migrations work (EC-20).
 - [x] Full automated suite passes; record exact pass/fail/skip counts.
 - [x] Final coverage report captured and compared to goals; disclose any shortfall.
 - [x] Demonstrate submit -> status -> completion, failure/retry, cancel, schedule, multi-worker and recovery.
-- [ ] Required deliverables exist; all docs match actual behavior; no uncommitted changes.
+- [x] Required deliverables exist; all docs match actual behavior; no uncommitted changes.
 
 ### Code Quality Gate
 - [x] No unsupported performance, delivery or exactly-once guarantees in documentation.
 
 ### Definition of Done
-- [ ] No critical open defects; final Git commit and submission reference recorded.
-- [ ] Human approves submission.
+- [x] No critical open defects; final Git commit and submission reference recorded.
+- [x] Human approves submission.
 
 **Execution Evidence:** see [EVIDENCE.md](EVIDENCE.md#phase-6--documentation-regression-and-submission).
 

@@ -212,6 +212,49 @@ docker compose up -d --build --wait
 scripts/smoke.sh
 ```
 
+### Verify from a fresh clone
+
+Every check from scratch, one command at a time (about 4 minutes in total). Results appear in the
+terminal and are also saved to `test-results.txt` and `smoke-results.txt`.
+
+0. **Prerequisites:** Docker is running and port 8000 is free. If another copy of this stack is
+   running, stop it in that directory with `docker compose --profile test down -v`.
+1. **Get the code:**
+   ```bash
+   git clone https://github.com/Tomerk87/job-queue-service-assignment.git
+   cd job-queue-service-assignment
+   ```
+2. **Build all images from scratch** (usually under a minute; depends on download speed):
+   ```bash
+   docker compose --profile test build --no-cache
+   ```
+3. **Run the automated test suite** (about 40 s; it starts PostgreSQL and Redis itself):
+   ```bash
+   docker compose --profile test run --rm tests pytest -v --cov=app --cov-report=term-missing | tee test-results.txt
+   ```
+   Expected: a coverage table and a final line such as `177 passed, 1 warning in 38.52s`.
+4. **Start the application** (migrations run first, then the API and the worker):
+   ```bash
+   docker compose up -d --wait
+   ```
+5. **Check the migrations:**
+   ```bash
+   docker compose logs migrate
+   ```
+   Expected: `Running upgrade  -> 0001` and `Running upgrade 0001 -> 0002`.
+6. **Run the end-to-end demo** (about 2.5 min):
+   ```bash
+   scripts/smoke.sh | tee smoke-results.txt
+   ```
+   Expected: `ALL CHECKS PASSED` as the last line.
+7. **Clean up** (stops everything and deletes the data volume):
+   ```bash
+   docker compose --profile test down -v
+   ```
+
+[EVIDENCE.md](EVIDENCE.md) is a hand-written record of verification runs. Running these commands
+doesn't update it automatically.
+
 ## Configuration
 
 All settings are environment variables with working defaults. `docker-compose.yml` sets them for the
