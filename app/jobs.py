@@ -426,7 +426,7 @@ def complete_job(
 
 
 def after_failed_attempt(retry_delays: tuple[timedelta, ...]) -> dict[str, Any]:
-    """The single retry rule for a failed attempt (handler error, or lease expiry in Phase 4).
+    """The single retry rule for a failed attempt (handler error or expired lease).
 
     attempts was incremented at claim time. While attempts < max_attempts the job goes
     back to PENDING, eligible again after retry_delays[attempts - 1] (30s, then 120s);

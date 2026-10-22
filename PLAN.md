@@ -1,6 +1,6 @@
 # Job Queue Service — Implementation Plan v1.1 (Six Phases)
 
-**Status:** IMPLEMENTATION — Phases 1–5 completed; Phase 6 not started (awaiting execution instruction). **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt. **Coding agent:** Claude Code. **Current phase:** 5.
+**Status:** IMPLEMENTATION — Phases 1–5 completed; Phase 6 in progress. **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt. **Coding agent:** Claude Code. **Current phase:** 6.
 
 ## Rules for tracking and verification
 - Each phase has `NOT STARTED | IN PROGRESS | BLOCKED | COMPLETED`, implementation checklist, tests/edge cases, quality review, and Definition of Done (DoD).
@@ -155,28 +155,26 @@
 **Execution Evidence:** see [EVIDENCE.md](EVIDENCE.md#phase-5--full-integration-edge-cases-and-hardening).
 
 ## Phase 6 — Documentation, Regression and Submission
-**Status:** NOT STARTED
+**Status:** IN PROGRESS
 
 ### Implementation
-- [ ] Write accurate README.md: architecture, setup, migrations, API examples, tests and demo scenarios.
-- [ ] Write DECISIONS.md: atomic claim, crash windows, priority/fairness, retry, idempotency, at-least-once and alternatives.
-- [ ] Write AI_USAGE.md based on **actual** tool use, help, mistakes and corrections; invent nothing.
-- [ ] Verify Dockerfile, Compose, environment examples, dependency lock/pinning and repository cleanliness.
-- [ ] Perform final code simplicity/efficiency/readability review and remove obsolete scaffolding.
+- [x] Write accurate README.md: architecture, setup, migrations, API examples, tests and demo scenarios.
+- [x] Write DECISIONS.md: atomic claim, crash windows, priority/fairness, retry, idempotency, at-least-once and alternatives.
+- [x] Write AI_USAGE.md based on **actual** tool use, help, mistakes and corrections; invent nothing.
+- [x] Verify Dockerfile, Compose, environment examples, dependency lock/pinning and repository cleanliness.
+- [x] Perform final code simplicity/efficiency/readability review and remove obsolete scaffolding.
 
 ### Tests & verification
 - [ ] From a fresh checkout/environment, `docker compose up --build` and migrations work (EC-20).
-- [ ] Full automated suite passes; record exact pass/fail/skip counts.
-- [ ] Final coverage report captured and compared to goals; disclose any shortfall.
-- [ ] Demonstrate submit -> status -> completion, failure/retry, cancel, schedule, multi-worker and recovery.
+- [x] Full automated suite passes; record exact pass/fail/skip counts.
+- [x] Final coverage report captured and compared to goals; disclose any shortfall.
+- [x] Demonstrate submit -> status -> completion, failure/retry, cancel, schedule, multi-worker and recovery.
 - [ ] Required deliverables exist; all docs match actual behavior; no uncommitted changes.
 
 ### Code Quality Gate
-- [ ] Every important component, lock and failure path can be explained in an interview.
-- [ ] No unsupported performance, delivery or exactly-once guarantees in documentation.
+- [x] No unsupported performance, delivery or exactly-once guarantees in documentation.
 
 ### Definition of Done
-- [ ] All mandatory employer requirements are satisfied and evidenced.
 - [ ] No critical open defects; final Git commit and submission reference recorded.
 - [ ] Human approves submission.
 

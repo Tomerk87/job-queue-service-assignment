@@ -1,0 +1,35 @@
+# Exact versions of every installed package (direct and transitive), as tested.
+# requirements*.txt list the direct dependencies; this file locks the full set.
+# Regenerate after changing requirements:
+#   docker compose --profile test build tests
+#   docker run --rm job-queue-service:test pip freeze --all | grep -viE '^(pip|setuptools|wheel)==' > constraints.txt
+alembic==1.15.2
+annotated-types==0.8.0
+anyio==4.15.1
+certifi==2026.10.19
+click==8.5.0
+coverage==7.16.2
+fastapi==0.115.12
+greenlet==3.5.6
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.20
+iniconfig==2.3.1
+Mako==1.4.3
+MarkupSafe==3.0.4
+packaging==26.3
+pluggy==1.7.0
+psycopg==3.2.6
+psycopg-binary==3.2.6
+pydantic==2.14.1
+pydantic_core==2.50.1
+pytest==8.3.5
+pytest-cov==6.1.1
+python-json-logger==3.3.0
+redis==5.2.1
+SQLAlchemy==2.0.40
+starlette==0.46.2
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+uvicorn==0.34.2

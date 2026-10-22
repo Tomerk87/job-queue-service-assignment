@@ -50,7 +50,7 @@ def client() -> Iterator[TestClient]:
 
 
 def set_status(job_id: str, status: str) -> None:
-    """Force a job into a state the Phase 1 API cannot produce (e.g. PROCESSING)."""
+    """Force a job into a state the API cannot set directly (e.g. PROCESSING)."""
     with engine.begin() as conn:
         conn.execute(
             text("UPDATE jobs SET status = :status WHERE id = :id"), {"status": status, "id": job_id}
