@@ -6,3 +6,6 @@ __pycache__/
 coverage.xml
 htmlcov/
 .pytest_cache/
+
+# Assignment brief and other local reference documents are not part of the repository.
+*.pdf

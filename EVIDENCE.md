@@ -388,4 +388,39 @@ _Recorded 2026-10-21._
 
 ## Phase 6 — Documentation, Regression and Submission
 
-_Not run. Commands/results/coverage/commit: pending._
+_Recorded 2026-10-22 (pre-commit verification; the fresh-clone EC-20 run follows after the human's commit and push)._
+
+- **Branch:** `phase_6_implementation`, created by the human from `main` after PR #5 was merged (base `8aa7a71`).
+- **Decisions approved by the human before execution:**
+  - AI_USAGE.md is written by the human; Claude created only the four template headings.
+  - Dependencies are locked with a pip-freeze `constraints.txt`.
+  - Process docs are kept, and the assignment PDF is untracked.
+  - EC-20 is verified on a fresh clone from GitHub after the commit.
+- **Implemented:**
+  - `README.md` rewritten from the code:
+    - architecture diagram and component table;
+    - run, scale and logs commands; a test-job submission with a sample response;
+    - API table with status codes; payload table and rules;
+    - lifecycle diagram; reliability section; tests and smoke-demo section;
+    - configuration table (all 15 settings), dependency lock section and project layout.
+  - `DECISIONS.md`: the assignment's sections 1–5 (pickup, crash recovery with the step-by-step flow, priority, retry timing, what I'd do differently) plus idempotency, scheduling, a crash-window table and alternatives considered. All claims were checked against the code; one overstatement about recovery timing while every worker is busy was corrected before recording.
+  - `AI_USAGE.md`: the four headings only (Tools I Used / What Helped Most / What I Had to Fix / What AI Struggled With), with an HTML comment noting that the author writes it.
+  - `constraints.txt`: 30 packages from `pip freeze --all` of the test image (minus pip/setuptools/wheel). The Dockerfile installs with `-c constraints.txt`, and the README documents how to regenerate it. A rebuilt image's `pip freeze` diffs empty against the file ("constraints-match").
+  - The assignment PDF was untracked with `git rm --cached` (the local file is kept and is still in git history), and `*.pdf` was added to `.gitignore`.
+  - Cleanup: phase-specific wording removed from the `app/jobs.py` docstring and the `tests/conftest.py` helper docstring. A search for `interim|until phase|later phase|phase N|TODO|FIXME|XXX` in app, tests, alembic, scripts and config finds nothing. `.env.example` lists all 15 settings in `app/config.py`. `.dockerignore` excludes `.git`, `.env`, caches, coverage files and `*.pdf`.
+- **Test suite (after the constraints rebuild):** `docker compose --profile test run --rm --build tests pytest -v --cov=app --cov-report=term-missing` → **177 passed, 0 failed, 0 skipped** (38.5s). `pyflakes app tests` → exit 0.
+- **Coverage vs. goals:** 99% total (675 statements, 6 missed) against a target of ≥ 85%, so the target is met. Critical modules (target ≥ 90%): `jobs.py` 99%, `worker.py` 97%. The misses are unchanged since Phase 5: the unreachable idempotency `RuntimeError`, the hang `os._exit` (covered by a subprocess test but not measured in-process), and the broken-pub/sub close. **No shortfall.**
+- **README examples run against a live stack:**
+  - The submit example returned 201 PENDING, then COMPLETED with attempts 1, progress 100 and a `message_id` result; the response has the 18 fields shown in the sample.
+  - Idempotent submit → 201, then 200. Scheduled submit with the macOS `date` variant → 201 SCHEDULED; the GNU variant works in a Debian container.
+  - List with filters → 200. Cancel → 200. Retry of a COMPLETED job → 409. Malformed id → 422.
+  - `/health` → 200 `ok` with counts. `/docs` → 200.
+  - `--scale worker=3` → 3 workers. Worker logs are JSON with `event`/`job_id`/`worker_id`.
+- **Demonstration:** `scripts/smoke.sh` on a fresh stack → **ALL CHECKS PASSED** (30 checks). Three workers handled 15 jobs, distributed 5/4/6 with at most 1 claim per job.
+- **Documentation claims review:** the README and DECISIONS state at-least-once execution and explicitly disclaim exactly-once side effects. They make no performance or throughput numbers, and no delivery guarantees beyond what the tests demonstrate.
+- **Open (pending the human):**
+  - EC-20 fresh-clone verification, which needs the commit and push first.
+  - AI_USAGE.md content (the author's).
+  - "Every important component can be explained in an interview": DECISIONS and README document each component, lock and failure path, and the human confirms.
+  - Final commit and submission reference; human approval of submission.
+- **Commit:** pending human instruction.
