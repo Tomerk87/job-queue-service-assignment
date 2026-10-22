@@ -1,5 +1,7 @@
 # Job Queue Service
 
+*Home assignment by Tomer.*
+
 A distributed background job processing system: a FastAPI API accepts jobs, PostgreSQL stores them
 and acts as the queue, separate Python worker processes claim and run them, and Redis delivers
 best-effort wake-up hints. It supports priorities, scheduled jobs, retry with backoff, cancellation,
