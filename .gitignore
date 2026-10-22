@@ -9,3 +9,7 @@ htmlcov/
 
 # Assignment brief and other local reference documents are not part of the repository.
 *.pdf
+
+# Output saved by the README's fresh-clone verification steps.
+test-results.txt
+smoke-results.txt

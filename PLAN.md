@@ -1,6 +1,6 @@
 # Job Queue Service — Implementation Plan v1.1 (Six Phases)
 
-**Status:** IMPLEMENTATION — Phases 1–5 completed; Phase 6 in progress. **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt. **Coding agent:** Claude Code. **Current phase:** 6.
+**Status:** COMPLETED — all six phases completed; submitted as tag `v1.0` on `main`. **Source of truth:** `TECHNICAL_SPEC.md`. **Time box:** 48 elapsed hours from assignment receipt. **Coding agent:** Claude Code. **Current phase:** 6.
 
 ## Rules for tracking and verification
 - Each phase has `NOT STARTED | IN PROGRESS | BLOCKED | COMPLETED`, implementation checklist, tests/edge cases, quality review, and Definition of Done (DoD).
@@ -155,7 +155,7 @@
 **Execution Evidence:** see [EVIDENCE.md](EVIDENCE.md#phase-5--full-integration-edge-cases-and-hardening).
 
 ## Phase 6 — Documentation, Regression and Submission
-**Status:** IN PROGRESS
+**Status:** COMPLETED
 
 ### Implementation
 - [x] Write accurate README.md: architecture, setup, migrations, API examples, tests and demo scenarios.
@@ -165,18 +165,18 @@
 - [x] Perform final code simplicity/efficiency/readability review and remove obsolete scaffolding.
 
 ### Tests & verification
-- [ ] From a fresh checkout/environment, `docker compose up --build` and migrations work (EC-20).
+- [x] From a fresh checkout/environment, `docker compose up --build` and migrations work (EC-20).
 - [x] Full automated suite passes; record exact pass/fail/skip counts.
 - [x] Final coverage report captured and compared to goals; disclose any shortfall.
 - [x] Demonstrate submit -> status -> completion, failure/retry, cancel, schedule, multi-worker and recovery.
-- [ ] Required deliverables exist; all docs match actual behavior; no uncommitted changes.
+- [x] Required deliverables exist; all docs match actual behavior; no uncommitted changes.
 
 ### Code Quality Gate
 - [x] No unsupported performance, delivery or exactly-once guarantees in documentation.
 
 ### Definition of Done
-- [ ] No critical open defects; final Git commit and submission reference recorded.
-- [ ] Human approves submission.
+- [x] No critical open defects; final Git commit and submission reference recorded.
+- [x] Human approves submission.
 
 **Execution Evidence:** see [EVIDENCE.md](EVIDENCE.md#phase-6--documentation-regression-and-submission).
 

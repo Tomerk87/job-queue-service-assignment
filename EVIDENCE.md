@@ -305,7 +305,7 @@ _Recorded 2026-10-21._
   - `app/main.py`: an `OperationalError` exception handler → 503 `{"detail": "database unavailable"}`, logged with `event=db_unavailable`; `/health` keeps its own 503 body.
   - Docs: TECHNICAL_SPEC §3 (503 rule); README (test section, smoke demo, DB-outage note, status line).
   - `pyproject.toml`: coverage `source = ["app"]` (migrations and tests excluded by location) and `exclude_also = ['if __name__ == .__main__.:']` (entrypoint boilerplate only). Both are documented in comments.
-  - New `scripts/smoke.sh`: 10 steps and 30 PASS/FAIL checks, with a non-zero exit on failure.
+  - New `scripts/smoke.sh`: 10 steps and 29 PASS/FAIL checks (27 `check` calls; step 1 runs 3 times), with a non-zero exit on failure. *Corrected in Phase 6: earlier records said 30 checks, which was a miscount.*
 - **New tests:**
   - **EC-15** (`tests/test_api.py`):
     - DB unreachable → `POST /jobs` returns 503 with no row and no Redis notification.
@@ -361,7 +361,7 @@ _Recorded 2026-10-21._
   | EC-19 | `test_process.py::test_three_workers_complete_all_jobs_without_duplicate_claims`; `scripts/smoke.sh` step 10 |
   | EC-20 | Phase 6 (fresh-environment run) |
 
-- **Manual Compose demo** (`docker compose down -v && docker compose up -d --build --wait && scripts/smoke.sh`): **ALL CHECKS PASSED** (30/30, exit 0, 2 min 18 s). It covered all job types, idempotency, cancel, failure → retries → FAILED → manual retry → 409 on COMPLETED, priority, scheduling, Redis down (`degraded` and still processed), SIGTERM drain (exit 0), SIGKILL recovery (attempt 2 with `lease_expired` logged), and 3 workers (15 jobs, max 1 claim per job, split 5/5/5).
+- **Manual Compose demo** (`docker compose down -v && docker compose up -d --build --wait && scripts/smoke.sh`): **ALL CHECKS PASSED** (29/29, exit 0, 2 min 18 s). It covered all job types, idempotency, cancel, failure → retries → FAILED → manual retry → 409 on COMPLETED, priority, scheduling, Redis down (`degraded` and still processed), SIGTERM drain (exit 0), SIGKILL recovery (attempt 2 with `lease_expired` logged), and 3 workers (15 jobs, max 1 claim per job, split 5/5/5).
 - **Quality-gate review (whole codebase):**
   - *Dependencies:* runtime packages are fastapi, uvicorn, SQLAlchemy, psycopg, alembic, redis and python-json-logger; dev packages are pytest, pytest-cov and httpx. All are used. Pinning transitive dependencies remains a Phase 6 item.
   - *Module boundaries:* routes (`main`), schemas, persistence and all state transitions (`jobs`), handlers, worker loop (`worker`), notifier, config and logging. There is no duplicated transition logic: cancel and retry share `_transition`, and handler failure and lease expiry share `after_failed_attempt`.
@@ -388,7 +388,7 @@ _Recorded 2026-10-21._
 
 ## Phase 6 — Documentation, Regression and Submission
 
-_Recorded 2026-10-22 (pre-commit verification; the fresh-clone EC-20 run follows after the human's commit and push)._
+_Recorded 2026-10-22._
 
 - **Branch:** `phase_6_implementation`, created by the human from `main` after PR #5 was merged (base `8aa7a71`).
 - **Decisions approved by the human before execution:**
@@ -416,11 +416,22 @@ _Recorded 2026-10-22 (pre-commit verification; the fresh-clone EC-20 run follows
   - List with filters → 200. Cancel → 200. Retry of a COMPLETED job → 409. Malformed id → 422.
   - `/health` → 200 `ok` with counts. `/docs` → 200.
   - `--scale worker=3` → 3 workers. Worker logs are JSON with `event`/`job_id`/`worker_id`.
-- **Demonstration:** `scripts/smoke.sh` on a fresh stack → **ALL CHECKS PASSED** (30 checks). Three workers handled 15 jobs, distributed 5/4/6 with at most 1 claim per job.
+- **Demonstration:** `scripts/smoke.sh` on a fresh stack → **ALL CHECKS PASSED** (29 checks). Three workers handled 15 jobs, distributed 5/4/6 with at most 1 claim per job.
 - **Documentation claims review:** the README and DECISIONS state at-least-once execution and explicitly disclaim exactly-once side effects. They make no performance or throughput numbers, and no delivery guarantees beyond what the tests demonstrate.
-- **Open (pending the human):**
-  - EC-20 fresh-clone verification, which needs the commit and push first.
-  - AI_USAGE.md content (the author's).
-  - "Every important component can be explained in an interview": DECISIONS and README document each component, lock and failure path, and the human confirms.
-  - Final commit and submission reference; human approval of submission.
-- **Commit:** pending human instruction.
+- **README "Verify from a fresh clone" section** (added after the human's review; it gives one ordered command per step, with expected output). Steps 2–7 were run verbatim in the working copy before commit: no-cache build in 13s; `177 passed, 1 warning in 40.14s`; migrations `-> 0001` and `0001 -> 0002`; smoke `ALL CHECKS PASSED` in 2 min 12 s. The time estimates were then corrected to the measured values. `test-results.txt` and `smoke-results.txt` were added to `.gitignore`.
+- **Commits by the human:** `81872f7` "phase 6 partial implementation" (merged into `main` as PR #6, `26240d1`) and `7576eb0` "approved all missing pieces to complete development" on `phase_6_implementation_b` (the README verification section plus the PLAN checkbox updates).
+- **EC-20, fresh-clone verification** (2026-10-22):
+  - *Source:* `git clone -b phase_6_implementation_b https://github.com/Tomerk87/job-queue-service-assignment.git` into an empty folder, at commit `7576eb0`. The working-copy stack and volume were removed first (`docker compose --profile test down -v`).
+  - *Deliverables in the clone:* README.md, AI_USAGE.md, DECISIONS.md, docker-compose.yml, Dockerfile, constraints.txt, app/, tests/ and the executable scripts/smoke.sh are present. **0 PDF files.**
+  - *Ran the README "Verify from a fresh clone" steps 2–7 exactly as written:*
+    - **2.** `docker compose --profile test build --no-cache` → exit 0 in 13s; all 3 `pip install … -c constraints.txt` steps executed.
+    - **3.** `docker compose --profile test run --rm tests pytest -v --cov=app --cov-report=term-missing | tee test-results.txt` → **177 passed, 1 warning in 39.61s**. Coverage TOTAL 99% (675 statements, 6 missed); `jobs.py` 99%, `worker.py` 97%.
+    - **4.** `docker compose up -d --wait` → migrate exited 0 and the API was healthy.
+    - **5.** `docker compose logs migrate` → `Running upgrade  -> 0001, Initial schema…` and `Running upgrade 0001 -> 0002, Index for newest-first job listing.`
+    - **6.** `scripts/smoke.sh | tee smoke-results.txt` → **ALL CHECKS PASSED**: 29 PASS, 0 FAIL, exit 0, 136 s. Three workers handled 15 jobs, 5/5/5.
+    - **7.** `docker compose --profile test down -v` → everything removed.
+  - The clone's working tree stayed clean apart from a separately captured `build.log`; the results files are git-ignored.
+- **Correction:** the smoke demo runs **29** checks, not 30 as stated in earlier records (Phase 5 evidence and the first Phase 6 entry). Fixed in this file.
+- **Documentation fixes in the close-out:** TECHNICAL_SPEC.md status line updated from "implementation not started" to implemented. AI_USAGE.md spelling only (`desicion` → `decision`, `wether` → `whether`, `RabbitMq` → `RabbitMQ`), approved by the human; its content is the author's.
+- **Submission reference:** annotated tag **`v1.0`** on `main` at the merge commit of the final Phase 6 PR. The human approved the submission on 2026-10-22.
+- **Commit:** Phase 6 close-out commit on `phase_6_implementation_b` (`git log --grep '^Phase 6 close-out'`), made on the human's instruction.
