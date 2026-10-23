@@ -86,6 +86,30 @@ A completed job looks like this:
 }
 ```
 
+## Explore it yourself
+
+With the stack running (`docker compose up -d --build --wait`):
+
+- **API:** open http://localhost:8000/docs (Swagger UI) to send any request from the browser. In
+  **Postman**, use *Import → Link* with `http://localhost:8000/openapi.json` to get a collection with
+  every endpoint.
+- **PostgreSQL:** connect any client (DBeaver, pgAdmin, TablePlus, `psql`) to `localhost:5432`, with
+  database, user and password all `jobqueue`. Without a local client:
+  `docker compose exec postgres psql -U jobqueue -d jobqueue`. Useful queries:
+  ```sql
+  SELECT id, type, status, priority, attempts, progress, worker_id, lease_expires_at
+  FROM jobs ORDER BY created_at DESC LIMIT 10;
+  SELECT created_at, event, level, metadata FROM job_logs WHERE job_id = '<id>' ORDER BY id;
+  SELECT * FROM idempotency_keys;
+  ```
+- **Redis:** `localhost:6379` (RedisInsight or `redis-cli`). To watch the wake-up hints arrive as
+  jobs are submitted: `docker compose exec redis redis-cli SUBSCRIBE jobs:created`.
+- **Workers:** `docker compose logs -f worker` shows every claim, retry and completion as JSON.
+
+Ports 5432 and 6379 are published on `127.0.0.1` only (not on your network). If either is already
+used on your machine, for example by a local PostgreSQL, stop that service or change the left side
+of the mapping in `docker-compose.yml`, such as `"127.0.0.1:15432:5432"`.
+
 ## API
 
 | Method and path | Purpose | Status codes |
